@@ -1,9 +1,9 @@
 {
-  "name": "json-toolkit",
+  "name": "json-yaml-toolkit",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
-  "description": "Free online JSON diff checker, validator, and formatter for developers",
+  "description": "Free online JSON/YAML formatter, validator, converter, diff checker, and visualizer for developers",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -19,10 +19,13 @@
   },
   "keywords": [
     "json",
+    "yaml",
+    "formatter",
+    "validator",
+    "converter",
     "diff",
     "compare",
-    "validator",
-    "formatter",
+    "visualizer",
     "developer-tools"
   ],
   "author": "",

@@ -1,17 +1,141 @@
-import React, { useState, useCallback, useMemo, createContext, useContext } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 
-// Theme Context
-const ThemeContext = createContext();
+// Simple YAML Parser (handles common cases)
+const yamlParse = (str) => {
+  const lines = str.split('\n');
+  const result = {};
+  const stack = [{ indent: -1, obj: result, isArray: false }];
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    
+    // Skip empty lines and comments
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    
+    // Calculate indent
+    const indent = line.search(/\S/);
+    
+    // Pop stack until we find parent
+    while (stack.length > 1 && stack[stack.length - 1].indent >= indent) {
+      stack.pop();
+    }
+    
+    const parent = stack[stack.length - 1];
+    
+    // Array item
+    if (trimmed.startsWith('- ')) {
+      const content = trimmed.slice(2).trim();
+      
+      if (!parent.isArray) {
+        const arr = [];
+        if (parent.currentKey) {
+          parent.obj[parent.currentKey] = arr;
+        }
+        stack.push({ indent, obj: arr, isArray: true });
+      }
+      
+      const currentParent = stack[stack.length - 1];
+      
+      if (content.includes(': ')) {
+        const obj = {};
+        const [key, ...valueParts] = content.split(': ');
+        const value = valueParts.join(': ');
+        obj[key.trim()] = parseValue(value.trim());
+        currentParent.obj.push(obj);
+        stack.push({ indent: indent + 2, obj, isArray: false });
+      } else if (content) {
+        currentParent.obj.push(parseValue(content));
+      } else {
+        const obj = {};
+        currentParent.obj.push(obj);
+        stack.push({ indent: indent + 2, obj, isArray: false });
+      }
+      continue;
+    }
+    
+    // Key-value pair
+    const colonIndex = trimmed.indexOf(':');
+    if (colonIndex > 0) {
+      const key = trimmed.slice(0, colonIndex).trim();
+      const value = trimmed.slice(colonIndex + 1).trim();
+      
+      if (value) {
+        parent.obj[key] = parseValue(value);
+      } else {
+        // Nested object or array coming
+        parent.obj[key] = {};
+        parent.currentKey = key;
+        stack.push({ indent, obj: parent.obj, isArray: false, currentKey: key });
+      }
+    }
+  }
+  
+  return result;
+};
 
+const parseValue = (value) => {
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  if (value === 'null' || value === '~') return null;
+  if (value.startsWith('"') && value.endsWith('"')) return value.slice(1, -1);
+  if (value.startsWith("'") && value.endsWith("'")) return value.slice(1, -1);
+  if (/^-?\d+$/.test(value)) return parseInt(value, 10);
+  if (/^-?\d*\.\d+$/.test(value)) return parseFloat(value);
+  return value;
+};
+
+// Convert to YAML string
+const toYamlString = (data, indent = 0) => {
+  const spaces = '  '.repeat(indent);
+  
+  if (data === null) return 'null';
+  if (typeof data === 'boolean') return String(data);
+  if (typeof data === 'number') return String(data);
+  if (typeof data === 'string') {
+    if (data.includes('\n') || data.includes(':') || data.includes('#')) {
+      return `"${data.replace(/"/g, '\\"')}"`;
+    }
+    return data;
+  }
+  
+  if (Array.isArray(data)) {
+    if (data.length === 0) return '[]';
+    return data.map(item => {
+      if (typeof item === 'object' && item !== null) {
+        const inner = toYamlString(item, indent + 1);
+        const firstLine = inner.split('\n')[0];
+        const rest = inner.split('\n').slice(1).join('\n');
+        return `${spaces}- ${firstLine}${rest ? '\n' + rest : ''}`;
+      }
+      return `${spaces}- ${toYamlString(item, indent)}`;
+    }).join('\n');
+  }
+  
+  if (typeof data === 'object') {
+    const entries = Object.entries(data);
+    if (entries.length === 0) return '{}';
+    return entries.map(([key, value]) => {
+      if (typeof value === 'object' && value !== null) {
+        const inner = toYamlString(value, indent + 1);
+        return `${spaces}${key}:\n${inner}`;
+      }
+      return `${spaces}${key}: ${toYamlString(value, indent)}`;
+    }).join('\n');
+  }
+  
+  return String(data);
+};
+
+// Theme definitions
 const themes = {
   dark: {
     name: 'dark',
-    bg: '#030712',
-    bgSecondary: 'rgba(15, 23, 42, 0.6)',
-    bgTertiary: 'rgba(0, 0, 0, 0.3)',
+    bg: '#0a0a0f',
+    bgSecondary: 'rgba(15, 23, 42, 0.8)',
+    bgTertiary: 'rgba(0, 0, 0, 0.4)',
     bgHover: 'rgba(30, 41, 59, 0.8)',
-    border: 'rgba(148, 163, 184, 0.08)',
-    borderLight: 'rgba(148, 163, 184, 0.15)',
+    border: 'rgba(148, 163, 184, 0.1)',
     text: '#e2e8f0',
     textSecondary: '#94a3b8',
     textMuted: '#64748b',
@@ -19,11 +143,11 @@ const themes = {
     accent: '#6366f1',
     accentLight: 'rgba(99, 102, 241, 0.15)',
     success: '#22c55e',
-    successLight: 'rgba(34, 197, 94, 0.1)',
+    successLight: 'rgba(34, 197, 94, 0.12)',
     error: '#ef4444',
-    errorLight: 'rgba(239, 68, 68, 0.1)',
+    errorLight: 'rgba(239, 68, 68, 0.12)',
     warning: '#f59e0b',
-    warningLight: 'rgba(245, 158, 11, 0.1)',
+    warningLight: 'rgba(245, 158, 11, 0.12)',
     string: '#86efac',
     number: '#fde047',
     boolean: '#c4b5fd',
@@ -37,8 +161,7 @@ const themes = {
     bgSecondary: '#ffffff',
     bgTertiary: '#f1f5f9',
     bgHover: '#e2e8f0',
-    border: 'rgba(51, 65, 85, 0.1)',
-    borderLight: 'rgba(51, 65, 85, 0.2)',
+    border: 'rgba(51, 65, 85, 0.12)',
     text: '#0f172a',
     textSecondary: '#334155',
     textMuted: '#64748b',
@@ -60,101 +183,128 @@ const themes = {
   }
 };
 
-const sampleLeft = `{
-  api: "v2.1",
-  user: {
-    id: 12345,
-    name: "John Doe",
-    email: "john@example.com",
-    roles: ["admin", "editor"],
-    settings: {
-      theme: "dark",
-      notifications: true,
-      preferences: { language: "en", timezone: "UTC" }
+const sampleJson = {
+  left: `{
+  "api": "v2.1",
+  "user": {
+    "id": 12345,
+    "name": "John Doe",
+    "roles": ["admin", "editor"],
+    "settings": {
+      "theme": "dark",
+      "notifications": true
     }
   },
-  items: [
-    { id: 1, name: "Item A", price: 29.99 },
-    { id: 2, name: "Item B", price: 49.99 }
-  ],
-  meta: { timestamp: "2024-01-15T10:30:00Z", version: 1 }
-}`;
-
-const sampleRight = `{
-  api: "v2.2",
-  user: {
-    id: 12345,
-    name: "John Smith",
-    email: "johnsmith@example.com",
-    roles: ["admin", "editor", "viewer"],
-    settings: {
-      theme: "light",
-      notifications: true,
-      preferences: { language: "es", timezone: "PST", currency: "USD" }
-    },
-    lastLogin: "2024-01-20"
+  "items": [
+    { "id": 1, "name": "Item A", "price": 29.99 },
+    { "id": 2, "name": "Item B", "price": 49.99 }
+  ]
+}`,
+  right: `{
+  "api": "v2.2",
+  "user": {
+    "id": 12345,
+    "name": "John Smith",
+    "roles": ["admin", "editor", "viewer"],
+    "settings": {
+      "theme": "light",
+      "notifications": true,
+      "language": "es"
+    }
   },
-  items: [
-    { id: 1, name: "Item A", price: 34.99 },
-    { id: 3, name: "Item C", price: 19.99 }
-  ],
-  meta: { timestamp: "2024-01-15T11:45:00Z", version: 2 },
-  newFeature: { enabled: true }
-}`;
-
-const sampleVisualizer = `{
+  "items": [
+    { "id": 1, "name": "Item A", "price": 34.99 },
+    { "id": 3, "name": "Item C", "price": 19.99 }
+  ]
+}`,
+  visualizer: `{
   "company": "TechCorp",
   "founded": 2015,
   "active": true,
   "headquarters": {
     "city": "San Francisco",
-    "country": "USA",
-    "coordinates": { "lat": 37.7749, "lng": -122.4194 }
+    "country": "USA"
   },
   "departments": [
-    { "name": "Engineering", "headcount": 150, "teams": ["Frontend", "Backend", "DevOps"] },
-    { "name": "Marketing", "headcount": 45, "teams": ["Content", "Growth", "Brand"] },
-    { "name": "Sales", "headcount": 80, "teams": ["Enterprise", "SMB"] }
-  ],
-  "products": [
-    { "id": "prod-001", "name": "CloudSync", "price": 99.99, "featured": true },
-    { "id": "prod-002", "name": "DataVault", "price": 149.99, "featured": false }
-  ],
-  "metadata": {
-    "lastUpdated": "2024-01-15T10:30:00Z",
-    "version": "2.1.0",
-    "tags": ["enterprise", "cloud", "saas"]
-  }
-}`;
+    { "name": "Engineering", "headcount": 150 },
+    { "name": "Marketing", "headcount": 45 }
+  ]
+}`,
+  yaml: `# Company Configuration
+company: TechCorp
+founded: 2015
+active: true
 
-const parseLooseJson = (str) => {
-  if (!str.trim()) return { valid: true, data: null, error: null, line: null };
+headquarters:
+  city: San Francisco
+  country: USA
+
+departments:
+  - name: Engineering
+    headcount: 150
+  - name: Marketing
+    headcount: 45
+
+features:
+  - analytics
+  - reporting
+  - exports`
+};
+
+// Format detection
+const detectFormat = (str) => {
+  const trimmed = str.trim();
+  if (!trimmed) return 'unknown';
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) return 'json';
+  return 'yaml';
+};
+
+// Parse JSON with loose syntax support
+const parseJson = (str) => {
+  if (!str.trim()) return { valid: true, data: null, error: null, line: null, format: 'json' };
   try {
-    return { valid: true, data: JSON.parse(str), error: null, line: null };
+    return { valid: true, data: JSON.parse(str), error: null, line: null, format: 'json' };
   } catch (e) {
     try {
       let fixed = str
         .replace(/([{,]\s*)([a-zA-Z_$][a-zA-Z0-9_$]*)\s*:/g, '$1"$2":')
         .replace(/:\s*'([^']*)'/g, ': "$1"')
         .replace(/,\s*([}\]])/g, '$1');
-      return { valid: true, data: JSON.parse(fixed), error: null, line: null, wasFixed: true };
+      return { valid: true, data: JSON.parse(fixed), error: null, line: null, format: 'json', wasFixed: true };
     } catch (e2) {
-      const lineMatch = e.message.match(/position (\d+)/);
-      let line = null;
-      if (lineMatch) {
-        const pos = parseInt(lineMatch[1]);
-        line = str.substring(0, pos).split('\n').length;
-      }
-      return { valid: false, data: null, error: e.message, line };
+      const match = e.message.match(/position (\d+)/);
+      const line = match ? str.substring(0, parseInt(match[1])).split('\n').length : null;
+      return { valid: false, data: null, error: e.message, line, format: 'json' };
     }
   }
 };
 
-const countJsonStats = (data, stats = { objects: 0, arrays: 0, strings: 0, numbers: 0, booleans: 0, nulls: 0, totalKeys: 0, maxDepth: 0 }, depth = 0) => {
+// Parse YAML
+const parseYamlStr = (str) => {
+  if (!str.trim()) return { valid: true, data: null, error: null, line: null, format: 'yaml' };
+  try {
+    const data = yamlParse(str);
+    return { valid: true, data, error: null, line: null, format: 'yaml' };
+  } catch (e) {
+    return { valid: false, data: null, error: e.message, line: null, format: 'yaml' };
+  }
+};
+
+// Smart parse
+const smartParse = (str) => {
+  if (!str.trim()) return { valid: true, data: null, error: null, line: null, format: 'unknown' };
+  return detectFormat(str) === 'json' ? parseJson(str) : parseYamlStr(str);
+};
+
+// JSON stringify helper
+const toJson = (data, pretty = true) => JSON.stringify(data, null, pretty ? 2 : 0);
+
+// Stats counter
+const countStats = (data, stats = { objects: 0, arrays: 0, strings: 0, numbers: 0, booleans: 0, nulls: 0, totalKeys: 0, maxDepth: 0 }, depth = 0) => {
   stats.maxDepth = Math.max(stats.maxDepth, depth);
   if (data === null) stats.nulls++;
-  else if (Array.isArray(data)) { stats.arrays++; data.forEach(item => countJsonStats(item, stats, depth + 1)); }
-  else if (typeof data === 'object') { stats.objects++; const keys = Object.keys(data); stats.totalKeys += keys.length; keys.forEach(key => countJsonStats(data[key], stats, depth + 1)); }
+  else if (Array.isArray(data)) { stats.arrays++; data.forEach(item => countStats(item, stats, depth + 1)); }
+  else if (typeof data === 'object') { stats.objects++; const keys = Object.keys(data); stats.totalKeys += keys.length; keys.forEach(key => countStats(data[key], stats, depth + 1)); }
   else if (typeof data === 'string') stats.strings++;
   else if (typeof data === 'number') stats.numbers++;
   else if (typeof data === 'boolean') stats.booleans++;
@@ -166,124 +316,197 @@ export default function JsonToolkit() {
   const [leftJson, setLeftJson] = useState('');
   const [rightJson, setRightJson] = useState('');
   const [visualizerJson, setVisualizerJson] = useState('');
+  const [converterInput, setConverterInput] = useState('');
+  const [converterOutput, setConverterOutput] = useState('');
+  const [outputFormat, setOutputFormat] = useState('yaml');
   const [activeTab, setActiveTab] = useState('diff');
   const [expandedNodes, setExpandedNodes] = useState(new Set(['$']));
   const [searchTerm, setSearchTerm] = useState('');
   const [showOnlyDiffs, setShowOnlyDiffs] = useState(false);
   const [copied, setCopied] = useState(null);
-  const [vizExpandedNodes, setVizExpandedNodes] = useState(new Set(['$']));
-  const [vizSearchTerm, setVizSearchTerm] = useState('');
-  const [vizHoveredPath, setVizHoveredPath] = useState(null);
+  const [vizExpanded, setVizExpanded] = useState(new Set(['$']));
+  const [vizSearch, setVizSearch] = useState('');
+  const [vizHover, setVizHover] = useState(null);
 
   const t = themes[theme];
-  const leftParsed = useMemo(() => parseLooseJson(leftJson), [leftJson]);
-  const rightParsed = useMemo(() => parseLooseJson(rightJson), [rightJson]);
-  const vizParsed = useMemo(() => parseLooseJson(visualizerJson), [visualizerJson]);
-  const vizStats = useMemo(() => vizParsed.valid && vizParsed.data ? countJsonStats(vizParsed.data) : null, [vizParsed]);
+  
+  const leftParsed = useMemo(() => smartParse(leftJson), [leftJson]);
+  const rightParsed = useMemo(() => smartParse(rightJson), [rightJson]);
+  const vizParsed = useMemo(() => smartParse(visualizerJson), [visualizerJson]);
+  const convParsed = useMemo(() => smartParse(converterInput), [converterInput]);
+  const vizStats = useMemo(() => vizParsed.valid && vizParsed.data ? countStats(vizParsed.data) : null, [vizParsed]);
 
-  const getType = (val) => { if (val === null) return 'null'; if (Array.isArray(val)) return 'array'; return typeof val; };
+  // Auto-convert
+  useMemo(() => {
+    if (convParsed.valid && convParsed.data !== null) {
+      try {
+        setConverterOutput(outputFormat === 'yaml' ? toYamlString(convParsed.data) : toJson(convParsed.data));
+      } catch { setConverterOutput(''); }
+    } else {
+      setConverterOutput('');
+    }
+  }, [convParsed, outputFormat]);
 
-  const buildDiffTree = useCallback((left, right, path = '$', key = 'root') => {
-    const leftType = getType(left);
-    const rightType = getType(right);
-    const node = { key, path, leftType, rightType, leftValue: left, rightValue: right, children: [], status: 'unchanged' };
+  const getType = (v) => v === null ? 'null' : Array.isArray(v) ? 'array' : typeof v;
+
+  // Build diff tree
+  const buildDiff = useCallback((left, right, path = '$', key = 'root') => {
+    const lt = getType(left), rt = getType(right);
+    const node = { key, path, lt, rt, lv: left, rv: right, children: [], status: 'unchanged' };
 
     if (left === undefined && right !== undefined) {
       node.status = 'added';
-      if (rightType === 'object' || rightType === 'array') {
-        const entries = rightType === 'array' ? right.map((v, i) => [i, v]) : Object.entries(right);
-        entries.forEach(([k, v]) => node.children.push(buildDiffTree(undefined, v, `${path}.${k}`, k)));
+      if (rt === 'object' || rt === 'array') {
+        (rt === 'array' ? right.map((v, i) => [i, v]) : Object.entries(right))
+          .forEach(([k, v]) => node.children.push(buildDiff(undefined, v, `${path}.${k}`, k)));
       }
       return node;
     }
     if (left !== undefined && right === undefined) {
       node.status = 'removed';
-      if (leftType === 'object' || leftType === 'array') {
-        const entries = leftType === 'array' ? left.map((v, i) => [i, v]) : Object.entries(left);
-        entries.forEach(([k, v]) => node.children.push(buildDiffTree(v, undefined, `${path}.${k}`, k)));
+      if (lt === 'object' || lt === 'array') {
+        (lt === 'array' ? left.map((v, i) => [i, v]) : Object.entries(left))
+          .forEach(([k, v]) => node.children.push(buildDiff(v, undefined, `${path}.${k}`, k)));
       }
       return node;
     }
-    if (leftType !== rightType) { node.status = 'type_changed'; return node; }
-    if (leftType === 'object' && left !== null) {
-      const allKeys = [...new Set([...Object.keys(left || {}), ...Object.keys(right || {})])];
-      allKeys.sort().forEach(k => {
-        const child = buildDiffTree(left[k], right[k], `${path}.${k}`, k);
+    if (lt !== rt) { node.status = 'type_changed'; return node; }
+    
+    if (lt === 'object' && left !== null) {
+      [...new Set([...Object.keys(left || {}), ...Object.keys(right || {})])].sort().forEach(k => {
+        const child = buildDiff(left[k], right[k], `${path}.${k}`, k);
         node.children.push(child);
         if (child.status !== 'unchanged') node.status = 'modified';
       });
-    } else if (leftType === 'array') {
-      const maxLen = Math.max(left.length, right.length);
-      for (let i = 0; i < maxLen; i++) {
-        const child = buildDiffTree(left[i], right[i], `${path}[${i}]`, i);
+    } else if (lt === 'array') {
+      for (let i = 0; i < Math.max(left.length, right.length); i++) {
+        const child = buildDiff(left[i], right[i], `${path}[${i}]`, i);
         node.children.push(child);
         if (child.status !== 'unchanged') node.status = 'modified';
       }
-    } else if (left !== right) node.status = 'modified';
+    } else if (left !== right) {
+      node.status = 'modified';
+    }
     return node;
   }, []);
 
   const diffTree = useMemo(() => {
-    if (!leftParsed.valid || !rightParsed.valid) return null;
-    if (leftParsed.data === null && rightParsed.data === null) return null;
-    return buildDiffTree(leftParsed.data, rightParsed.data);
-  }, [leftParsed, rightParsed, buildDiffTree]);
+    if (!leftParsed.valid || !rightParsed.valid || (!leftParsed.data && !rightParsed.data)) return null;
+    return buildDiff(leftParsed.data, rightParsed.data);
+  }, [leftParsed, rightParsed, buildDiff]);
 
   const countDiffs = useCallback((node) => {
     if (!node) return { added: 0, removed: 0, modified: 0, type_changed: 0 };
-    let counts = { added: 0, removed: 0, modified: 0, type_changed: 0 };
-    if (node.status === 'added' && node.children.length === 0) counts.added++;
-    else if (node.status === 'removed' && node.children.length === 0) counts.removed++;
-    else if (node.status === 'modified' && node.children.length === 0) counts.modified++;
-    else if (node.status === 'type_changed') counts.type_changed++;
-    node.children.forEach(child => {
-      const cc = countDiffs(child);
-      counts.added += cc.added; counts.removed += cc.removed; counts.modified += cc.modified; counts.type_changed += cc.type_changed;
+    const c = { added: 0, removed: 0, modified: 0, type_changed: 0 };
+    if (!node.children.length) {
+      if (node.status === 'added') c.added++;
+      else if (node.status === 'removed') c.removed++;
+      else if (node.status === 'modified') c.modified++;
+      else if (node.status === 'type_changed') c.type_changed++;
+    }
+    node.children.forEach(ch => {
+      const x = countDiffs(ch);
+      c.added += x.added; c.removed += x.removed; c.modified += x.modified; c.type_changed += x.type_changed;
     });
-    return counts;
+    return c;
   }, []);
 
   const stats = useMemo(() => countDiffs(diffTree), [diffTree, countDiffs]);
 
-  const toggleNode = (path) => setExpandedNodes(prev => { const next = new Set(prev); if (next.has(path)) next.delete(path); else next.add(path); return next; });
-  const expandAll = () => { const paths = new Set(); const traverse = (node) => { if (!node) return; paths.add(node.path); node.children.forEach(traverse); }; traverse(diffTree); setExpandedNodes(paths); };
-  const collapseAll = () => setExpandedNodes(new Set(['$']));
-  const expandDiffs = () => { const paths = new Set(['$']); const traverse = (node) => { if (!node) return; if (node.status !== 'unchanged') { let p = node.path; while (p) { paths.add(p); p = p.includes('.') ? p.substring(0, p.lastIndexOf('.')) : (p === '$' ? null : '$'); } } node.children.forEach(traverse); }; traverse(diffTree); setExpandedNodes(paths); };
-
-  const formatJson = (side) => {
-    if (side === 'viz') { if (vizParsed.valid && vizParsed.data !== null) setVisualizerJson(JSON.stringify(vizParsed.data, null, 2)); return; }
-    const parsed = side === 'left' ? leftParsed : rightParsed;
-    const setter = side === 'left' ? setLeftJson : setRightJson;
-    if (parsed.valid && parsed.data !== null) setter(JSON.stringify(parsed.data, null, 2));
+  const toggle = (path, setter) => setter(p => { const n = new Set(p); n.has(path) ? n.delete(path) : n.add(path); return n; });
+  
+  const expandAll = () => {
+    const paths = new Set();
+    const traverse = n => { if (!n) return; paths.add(n.path); n.children.forEach(traverse); };
+    traverse(diffTree);
+    setExpandedNodes(paths);
   };
 
-  const minifyJson = (side) => {
-    if (side === 'viz') { if (vizParsed.valid && vizParsed.data !== null) setVisualizerJson(JSON.stringify(vizParsed.data)); return; }
-    const parsed = side === 'left' ? leftParsed : rightParsed;
-    const setter = side === 'left' ? setLeftJson : setRightJson;
-    if (parsed.valid && parsed.data !== null) setter(JSON.stringify(parsed.data));
+  const expandDiffs = () => {
+    const paths = new Set(['$']);
+    const traverse = n => {
+      if (!n) return;
+      if (n.status !== 'unchanged') {
+        let p = n.path;
+        while (p) { paths.add(p); p = p.includes('.') ? p.substring(0, p.lastIndexOf('.')) : p === '$' ? null : '$'; }
+      }
+      n.children.forEach(traverse);
+    };
+    traverse(diffTree);
+    setExpandedNodes(paths);
+  };
+
+  const expandVizAll = () => {
+    const paths = new Set();
+    const traverse = (d, p = '$') => {
+      paths.add(p);
+      if (Array.isArray(d)) d.forEach((x, i) => traverse(x, `${p}[${i}]`));
+      else if (d && typeof d === 'object') Object.keys(d).forEach(k => traverse(d[k], `${p}.${k}`));
+    };
+    if (vizParsed.data) traverse(vizParsed.data);
+    setVizExpanded(paths);
+  };
+
+  const expandToLevel = (lvl) => {
+    const paths = new Set();
+    const traverse = (d, p = '$', l = 0) => {
+      if (l <= lvl) paths.add(p);
+      if (l >= lvl) return;
+      if (Array.isArray(d)) d.forEach((x, i) => traverse(x, `${p}[${i}]`, l + 1));
+      else if (d && typeof d === 'object') Object.keys(d).forEach(k => traverse(d[k], `${p}.${k}`, l + 1));
+    };
+    if (vizParsed.data) traverse(vizParsed.data);
+    setVizExpanded(paths);
+  };
+
+  const copy = (text, id) => { navigator.clipboard.writeText(text); setCopied(id); setTimeout(() => setCopied(null), 2000); };
+
+  const loadSample = () => {
+    if (activeTab === 'converter') setConverterInput(sampleJson.yaml);
+    else if (activeTab === 'visualizer' || activeTab === 'validate') setVisualizerJson(sampleJson.visualizer);
+    else { setLeftJson(sampleJson.left); setRightJson(sampleJson.right); }
+  };
+
+  const clear = () => {
+    if (activeTab === 'converter') { setConverterInput(''); setConverterOutput(''); }
+    else if (activeTab === 'visualizer' || activeTab === 'validate') setVisualizerJson('');
+    else { setLeftJson(''); setRightJson(''); }
+  };
+
+  const swap = () => { const tmp = leftJson; setLeftJson(rightJson); setRightJson(tmp); };
+
+  const format = (side) => {
+    const map = { left: [leftParsed, setLeftJson], right: [rightParsed, setRightJson], viz: [vizParsed, setVisualizerJson], conv: [convParsed, setConverterInput] };
+    const [p, s] = map[side];
+    if (p.valid && p.data) s(p.format === 'yaml' ? toYamlString(p.data) : toJson(p.data));
+  };
+
+  const minify = (side) => {
+    const map = { left: [leftParsed, setLeftJson], right: [rightParsed, setRightJson], viz: [vizParsed, setVisualizerJson], conv: [convParsed, setConverterInput] };
+    const [p, s] = map[side];
+    if (p.valid && p.data) s(toJson(p.data, false));
+  };
+
+  const toJsonFmt = (side) => {
+    const map = { left: [leftParsed, setLeftJson], right: [rightParsed, setRightJson], viz: [vizParsed, setVisualizerJson], conv: [convParsed, setConverterInput] };
+    const [p, s] = map[side];
+    if (p.valid && p.data) s(toJson(p.data));
+  };
+
+  const toYamlFmt = (side) => {
+    const map = { left: [leftParsed, setLeftJson], right: [rightParsed, setRightJson], viz: [vizParsed, setVisualizerJson], conv: [convParsed, setConverterInput] };
+    const [p, s] = map[side];
+    if (p.valid && p.data) s(toYamlString(p.data));
   };
 
   const sortKeys = (side) => {
-    const sortObj = (obj) => { if (Array.isArray(obj)) return obj.map(sortObj); if (obj && typeof obj === 'object') return Object.keys(obj).sort().reduce((acc, key) => { acc[key] = sortObj(obj[key]); return acc; }, {}); return obj; };
-    if (side === 'viz') { if (vizParsed.valid && vizParsed.data !== null) setVisualizerJson(JSON.stringify(sortObj(vizParsed.data), null, 2)); return; }
-    const parsed = side === 'left' ? leftParsed : rightParsed;
-    const setter = side === 'left' ? setLeftJson : setRightJson;
-    if (parsed.valid && parsed.data !== null) setter(JSON.stringify(sortObj(parsed.data), null, 2));
+    const sortObj = o => Array.isArray(o) ? o.map(sortObj) : o && typeof o === 'object' ? Object.keys(o).sort().reduce((a, k) => { a[k] = sortObj(o[k]); return a; }, {}) : o;
+    const map = { left: [leftParsed, setLeftJson], right: [rightParsed, setRightJson], viz: [vizParsed, setVisualizerJson], conv: [convParsed, setConverterInput] };
+    const [p, s] = map[side];
+    if (p.valid && p.data) s(p.format === 'yaml' ? toYamlString(sortObj(p.data)) : toJson(sortObj(p.data)));
   };
 
-  const copyToClipboard = (text, id) => { navigator.clipboard.writeText(text); setCopied(id); setTimeout(() => setCopied(null), 2000); };
-
-  const loadSample = () => { if (activeTab === 'visualizer' || activeTab === 'validate') setVisualizerJson(sampleVisualizer); else { setLeftJson(sampleLeft); setRightJson(sampleRight); } };
-  const clearAll = () => { if (activeTab === 'visualizer' || activeTab === 'validate') setVisualizerJson(''); else { setLeftJson(''); setRightJson(''); } };
-  const swapPanels = () => { const temp = leftJson; setLeftJson(rightJson); setRightJson(temp); };
-
-  const toggleVizNode = (path) => setVizExpandedNodes(prev => { const next = new Set(prev); if (next.has(path)) next.delete(path); else next.add(path); return next; });
-  const expandAllViz = () => { const paths = new Set(); const traverse = (data, path = '$') => { paths.add(path); if (Array.isArray(data)) data.forEach((item, i) => traverse(item, `${path}[${i}]`)); else if (data && typeof data === 'object') Object.keys(data).forEach(key => traverse(data[key], `${path}.${key}`)); }; if (vizParsed.data) traverse(vizParsed.data); setVizExpandedNodes(paths); };
-  const collapseAllViz = () => setVizExpandedNodes(new Set(['$']));
-  const expandToLevel = (level) => { const paths = new Set(); const traverse = (data, path = '$', currentLevel = 0) => { if (currentLevel <= level) paths.add(path); if (currentLevel >= level) return; if (Array.isArray(data)) data.forEach((item, i) => traverse(item, `${path}[${i}]`, currentLevel + 1)); else if (data && typeof data === 'object') Object.keys(data).forEach(key => traverse(data[key], `${path}.${key}`, currentLevel + 1)); }; if (vizParsed.data) traverse(vizParsed.data); setVizExpandedNodes(paths); };
-
-  const statusConfig = {
+  const statusCfg = {
     added: { bg: t.name === 'dark' ? '#052e16' : '#dcfce7', border: '#16a34a', color: t.name === 'dark' ? '#4ade80' : '#16a34a' },
     removed: { bg: t.name === 'dark' ? '#450a0a' : '#fee2e2', border: '#dc2626', color: t.name === 'dark' ? '#f87171' : '#dc2626' },
     modified: { bg: t.name === 'dark' ? '#422006' : '#fef3c7', border: '#d97706', color: t.name === 'dark' ? '#fbbf24' : '#d97706' },
@@ -291,82 +514,82 @@ export default function JsonToolkit() {
     unchanged: { bg: 'transparent', border: 'transparent', color: t.textMuted }
   };
 
-  const formatValue = (val, type) => {
-    if (val === undefined) return <span style={{ color: t.textDim }}>—</span>;
-    if (val === null) return <span style={{ color: t.null, fontStyle: 'italic' }}>null</span>;
-    if (type === 'string') return <span style={{ color: t.string }}>"{val.length > 35 ? val.slice(0, 35) + '...' : val}"</span>;
-    if (type === 'number') return <span style={{ color: t.number }}>{val}</span>;
-    if (type === 'boolean') return <span style={{ color: t.boolean }}>{String(val)}</span>;
-    if (type === 'array') return <span style={{ color: t.bracket }}>[{val.length}]</span>;
-    if (type === 'object') return <span style={{ color: t.bracket }}>{`{${Object.keys(val).length}}`}</span>;
-    return String(val);
+  const fmtVal = (v, type) => {
+    if (v === undefined) return <span style={{ color: t.textDim }}>—</span>;
+    if (v === null) return <span style={{ color: t.null, fontStyle: 'italic' }}>null</span>;
+    if (type === 'string') return <span style={{ color: t.string }}>"{v.length > 30 ? v.slice(0, 30) + '...' : v}"</span>;
+    if (type === 'number') return <span style={{ color: t.number }}>{v}</span>;
+    if (type === 'boolean') return <span style={{ color: t.boolean }}>{String(v)}</span>;
+    if (type === 'array') return <span style={{ color: t.bracket }}>[{v.length}]</span>;
+    if (type === 'object') return <span style={{ color: t.bracket }}>{`{${Object.keys(v).length}}`}</span>;
+    return String(v);
   };
 
-  const TreeNode = ({ node, depth = 0 }) => {
+  const Badge = ({ format }) => (
+    <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, fontWeight: 600, textTransform: 'uppercase', background: format === 'yaml' ? 'rgba(250, 204, 21, 0.15)' : 'rgba(96, 165, 250, 0.15)', color: format === 'yaml' ? '#facc15' : '#60a5fa', border: `1px solid ${format === 'yaml' ? 'rgba(250, 204, 21, 0.3)' : 'rgba(96, 165, 250, 0.3)'}` }}>
+      {format}
+    </span>
+  );
+
+  // Tree Node for Diff
+  const DiffNode = ({ node, depth = 0 }) => {
     if (!node) return null;
-    const isExpanded = expandedNodes.has(node.path);
-    const hasChildren = node.children.length > 0;
-    const config = statusConfig[node.status];
-    const isLeaf = !hasChildren || (node.status === 'type_changed');
+    const exp = expandedNodes.has(node.path);
+    const hasKids = node.children.length > 0;
+    const cfg = statusCfg[node.status];
+    const isLeaf = !hasKids || node.status === 'type_changed';
 
     if (searchTerm && !node.path.toLowerCase().includes(searchTerm.toLowerCase())) {
-      const hasMatchingChild = node.children.some(c => c.path.toLowerCase().includes(searchTerm.toLowerCase()) || JSON.stringify(c.leftValue).toLowerCase().includes(searchTerm.toLowerCase()) || JSON.stringify(c.rightValue).toLowerCase().includes(searchTerm.toLowerCase()));
-      if (!hasMatchingChild) return null;
+      const match = node.children.some(c => c.path.toLowerCase().includes(searchTerm.toLowerCase()));
+      if (!match) return null;
     }
     if (showOnlyDiffs && node.status === 'unchanged' && !node.children.some(c => c.status !== 'unchanged')) return null;
 
     return (
-      <div style={{ marginLeft: depth > 0 ? 18 : 0 }}>
-        <div onClick={() => hasChildren && toggleNode(node.path)} style={{ display: 'flex', alignItems: 'stretch', padding: '5px 0', cursor: hasChildren ? 'pointer' : 'default', borderLeft: `3px solid ${config.border}`, marginBottom: 2, background: node.status !== 'unchanged' ? config.bg : 'transparent', borderRadius: '0 6px 6px 0', transition: 'background 0.15s' }}>
-          <div style={{ width: 22, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            {hasChildren && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={t.textMuted} strokeWidth="2" style={{ transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s' }}><path d="M9 18l6-6-6-6" /></svg>}
+      <div style={{ marginLeft: depth > 0 ? 16 : 0 }}>
+        <div onClick={() => hasKids && toggle(node.path, setExpandedNodes)} style={{ display: 'flex', alignItems: 'center', padding: '4px 0', cursor: hasKids ? 'pointer' : 'default', borderLeft: `3px solid ${cfg.border}`, marginBottom: 2, background: node.status !== 'unchanged' ? cfg.bg : 'transparent', borderRadius: '0 6px 6px 0' }}>
+          <div style={{ width: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            {hasKids && <span style={{ transform: exp ? 'rotate(90deg)' : '', transition: 'transform 0.15s', color: t.textMuted }}>▶</span>}
           </div>
-          <div style={{ minWidth: 100, maxWidth: 180, paddingRight: 10, display: 'flex', alignItems: 'center' }}>
-            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: node.status !== 'unchanged' ? t.text : t.textSecondary, fontWeight: node.status !== 'unchanged' ? 600 : 400 }}>{node.key}</span>
-            {node.status !== 'unchanged' && <span style={{ marginLeft: 6, padding: '1px 5px', borderRadius: 3, fontSize: 8, fontWeight: 700, background: config.bg, color: config.color, border: `1px solid ${config.border}`, textTransform: 'uppercase', letterSpacing: '0.3px' }}>{node.status === 'added' ? '+' : node.status === 'removed' ? '−' : node.status === 'modified' ? '~' : '⇄'}</span>}
+          <div style={{ minWidth: 90, maxWidth: 160, paddingRight: 8, display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ fontFamily: 'monospace', fontSize: 11, color: node.status !== 'unchanged' ? t.text : t.textSecondary, fontWeight: node.status !== 'unchanged' ? 600 : 400 }}>{node.key}</span>
+            {node.status !== 'unchanged' && <span style={{ padding: '1px 4px', borderRadius: 3, fontSize: 8, fontWeight: 700, background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}` }}>{node.status === 'added' ? '+' : node.status === 'removed' ? '−' : node.status === 'modified' ? '~' : '⇄'}</span>}
           </div>
           {isLeaf && (
-            <div style={{ display: 'flex', flex: 1, gap: 12, alignItems: 'center', paddingRight: 10 }}>
-              <div style={{ flex: 1, padding: '3px 8px', borderRadius: 4, fontFamily: "'JetBrains Mono', monospace", fontSize: 10, background: (node.status === 'removed' || node.status === 'modified' || node.status === 'type_changed') ? t.errorLight : t.bgTertiary, border: (node.status === 'removed' || node.status === 'modified' || node.status === 'type_changed') ? `1px solid ${t.error}20` : '1px solid transparent', minHeight: 24, display: 'flex', alignItems: 'center' }}>
-                {formatValue(node.leftValue, node.leftType)}
-              </div>
-              <div style={{ color: t.textDim, fontSize: 12 }}>→</div>
-              <div style={{ flex: 1, padding: '3px 8px', borderRadius: 4, fontFamily: "'JetBrains Mono', monospace", fontSize: 10, background: (node.status === 'added' || node.status === 'modified' || node.status === 'type_changed') ? t.successLight : t.bgTertiary, border: (node.status === 'added' || node.status === 'modified' || node.status === 'type_changed') ? `1px solid ${t.success}20` : '1px solid transparent', minHeight: 24, display: 'flex', alignItems: 'center' }}>
-                {formatValue(node.rightValue, node.rightType)}
-              </div>
+            <div style={{ display: 'flex', flex: 1, gap: 8, alignItems: 'center', paddingRight: 8 }}>
+              <div style={{ flex: 1, padding: '2px 6px', borderRadius: 4, fontFamily: 'monospace', fontSize: 10, background: ['removed', 'modified', 'type_changed'].includes(node.status) ? t.errorLight : t.bgTertiary }}>{fmtVal(node.lv, node.lt)}</div>
+              <span style={{ color: t.textDim }}>→</span>
+              <div style={{ flex: 1, padding: '2px 6px', borderRadius: 4, fontFamily: 'monospace', fontSize: 10, background: ['added', 'modified', 'type_changed'].includes(node.status) ? t.successLight : t.bgTertiary }}>{fmtVal(node.rv, node.rt)}</div>
             </div>
           )}
-          {!isLeaf && <div style={{ flex: 1, display: 'flex', alignItems: 'center', color: t.textMuted, fontSize: 10, fontFamily: "'JetBrains Mono', monospace" }}>{node.leftType === 'array' ? `Array[${node.leftValue?.length || 0}]` : `Object{${Object.keys(node.leftValue || {}).length}}`}{node.status === 'modified' && <span style={{ marginLeft: 6, color: t.warning, fontSize: 9 }}>• changes</span>}</div>}
+          {!isLeaf && <span style={{ color: t.textMuted, fontSize: 10, fontFamily: 'monospace' }}>{node.lt === 'array' ? `[${node.lv?.length || 0}]` : `{${Object.keys(node.lv || {}).length}}`}{node.status === 'modified' && <span style={{ color: t.warning, marginLeft: 4 }}>•</span>}</span>}
         </div>
-        {hasChildren && isExpanded && <div style={{ borderLeft: `1px solid ${t.border}`, marginLeft: 10 }}>{node.children.map(child => <TreeNode key={child.path} node={child} depth={depth + 1} />)}</div>}
+        {hasKids && exp && <div style={{ borderLeft: `1px solid ${t.border}`, marginLeft: 9 }}>{node.children.map(c => <DiffNode key={c.path} node={c} depth={depth + 1} />)}</div>}
       </div>
     );
   };
 
-  const VisualizerNode = ({ data, path = '$', keyName = 'root', depth = 0 }) => {
+  // Tree Node for Visualizer
+  const VizNode = ({ data, path = '$', keyName = 'root', depth = 0 }) => {
     const type = getType(data);
-    const isExpanded = vizExpandedNodes.has(path);
-    const isHovered = vizHoveredPath === path;
-    const hasChildren = (type === 'object' && data !== null && Object.keys(data).length > 0) || (type === 'array' && data.length > 0);
+    const exp = vizExpanded.has(path);
+    const hover = vizHover === path;
+    const hasKids = (type === 'object' && data && Object.keys(data).length > 0) || (type === 'array' && data.length > 0);
 
-    if (vizSearchTerm) {
-      const searchLower = vizSearchTerm.toLowerCase();
-      const matchesKey = String(keyName).toLowerCase().includes(searchLower);
-      const matchesValue = type !== 'object' && type !== 'array' && String(data).toLowerCase().includes(searchLower);
-      const matchesPath = path.toLowerCase().includes(searchLower);
-      if (!matchesKey && !matchesValue && !matchesPath) {
-        if (hasChildren) {
-          let hasMatchingChild = false;
-          if (type === 'array') hasMatchingChild = data.some((item, i) => { const childPath = `${path}[${i}]`; return childPath.toLowerCase().includes(searchLower) || JSON.stringify(item).toLowerCase().includes(searchLower); });
-          else if (type === 'object') hasMatchingChild = Object.entries(data).some(([k, v]) => { const childPath = `${path}.${k}`; return k.toLowerCase().includes(searchLower) || childPath.toLowerCase().includes(searchLower) || JSON.stringify(v).toLowerCase().includes(searchLower); });
-          if (!hasMatchingChild) return null;
-        } else return null;
-      }
+    if (vizSearch) {
+      const s = vizSearch.toLowerCase();
+      const match = String(keyName).toLowerCase().includes(s) || (type !== 'object' && type !== 'array' && String(data).toLowerCase().includes(s));
+      if (!match && hasKids) {
+        let childMatch = false;
+        if (type === 'array') childMatch = data.some((x, i) => JSON.stringify(x).toLowerCase().includes(s));
+        else if (type === 'object') childMatch = Object.entries(data).some(([k, v]) => k.toLowerCase().includes(s) || JSON.stringify(v).toLowerCase().includes(s));
+        if (!childMatch) return null;
+      } else if (!match) return null;
     }
 
-    const renderValue = () => {
+    const renderVal = () => {
       if (type === 'null') return <span style={{ color: t.null, fontStyle: 'italic' }}>null</span>;
-      if (type === 'string') return <span style={{ color: t.string }}>"{data.length > 50 ? data.slice(0, 50) + '...' : data}"</span>;
+      if (type === 'string') return <span style={{ color: t.string }}>"{data.length > 40 ? data.slice(0, 40) + '...' : data}"</span>;
       if (type === 'number') return <span style={{ color: t.number }}>{data}</span>;
       if (type === 'boolean') return <span style={{ color: t.boolean }}>{String(data)}</span>;
       if (type === 'array') return <span style={{ color: t.bracket }}>[</span>;
@@ -374,174 +597,296 @@ export default function JsonToolkit() {
       return null;
     };
 
-    const getChildCount = () => { if (type === 'array') return data.length; if (type === 'object' && data !== null) return Object.keys(data).length; return 0; };
-
     return (
-      <div style={{ marginLeft: depth > 0 ? 16 : 0 }}>
-        <div onClick={() => hasChildren && toggleVizNode(path)} onMouseEnter={() => setVizHoveredPath(path)} onMouseLeave={() => setVizHoveredPath(null)} style={{ display: 'flex', alignItems: 'center', padding: '4px 8px', marginBottom: 1, borderRadius: 6, cursor: hasChildren ? 'pointer' : 'default', background: isHovered ? t.bgHover : 'transparent', transition: 'all 0.1s' }}>
-          <div style={{ width: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            {hasChildren && <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke={t.textMuted} strokeWidth="2.5" style={{ transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s' }}><path d="M9 18l6-6-6-6" /></svg>}
+      <div style={{ marginLeft: depth > 0 ? 14 : 0 }}>
+        <div onClick={() => hasKids && toggle(path, setVizExpanded)} onMouseEnter={() => setVizHover(path)} onMouseLeave={() => setVizHover(null)} style={{ display: 'flex', alignItems: 'center', padding: '3px 6px', borderRadius: 4, cursor: hasKids ? 'pointer' : 'default', background: hover ? t.bgHover : 'transparent' }}>
+          <div style={{ width: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            {hasKids && <span style={{ transform: exp ? 'rotate(90deg)' : '', transition: 'transform 0.15s', color: t.textMuted, fontSize: 10 }}>▶</span>}
           </div>
-          {depth > 0 && <span style={{ color: t.key, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 500 }}>"{keyName}"</span>}
-          {depth > 0 && <span style={{ color: t.textMuted, margin: '0 5px' }}>:</span>}
-          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11 }}>{renderValue()}</span>
-          {hasChildren && !isExpanded && <span style={{ color: t.textDim, fontSize: 10, marginLeft: 4 }}>{type === 'array' ? `${getChildCount()} items` : `${getChildCount()} keys`}<span style={{ color: t.bracket, marginLeft: 3 }}>{type === 'array' ? ']' : '}'}</span></span>}
-          {isHovered && (
-            <div style={{ marginLeft: 'auto', display: 'flex', gap: 3 }}>
-              <button onClick={(e) => { e.stopPropagation(); copyToClipboard(JSON.stringify(data, null, 2), path); }} style={{ padding: '2px 5px', background: t.bgTertiary, border: 'none', borderRadius: 3, color: copied === path ? t.success : t.textMuted, cursor: 'pointer', fontSize: 9, fontWeight: 500 }}>{copied === path ? '✓' : 'Copy'}</button>
-              <button onClick={(e) => { e.stopPropagation(); copyToClipboard(path, `path-${path}`); }} style={{ padding: '2px 5px', background: t.bgTertiary, border: 'none', borderRadius: 3, color: copied === `path-${path}` ? t.success : t.textMuted, cursor: 'pointer', fontSize: 9, fontWeight: 500 }}>{copied === `path-${path}` ? '✓' : 'Path'}</button>
+          {depth > 0 && <span style={{ color: t.key, fontFamily: 'monospace', fontSize: 11 }}>"{keyName}"</span>}
+          {depth > 0 && <span style={{ color: t.textMuted, margin: '0 4px' }}>:</span>}
+          <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{renderVal()}</span>
+          {hasKids && !exp && <span style={{ color: t.textDim, fontSize: 10, marginLeft: 4 }}>{type === 'array' ? `${data.length}]` : `${Object.keys(data).length}}`}</span>}
+          {hover && (
+            <div style={{ marginLeft: 'auto', display: 'flex', gap: 2 }}>
+              <button onClick={e => { e.stopPropagation(); copy(JSON.stringify(data, null, 2), path); }} style={{ padding: '1px 4px', background: t.bgTertiary, border: 'none', borderRadius: 3, color: copied === path ? t.success : t.textMuted, cursor: 'pointer', fontSize: 9 }}>{copied === path ? '✓' : 'Copy'}</button>
+              <button onClick={e => { e.stopPropagation(); copy(path, `p-${path}`); }} style={{ padding: '1px 4px', background: t.bgTertiary, border: 'none', borderRadius: 3, color: copied === `p-${path}` ? t.success : t.textMuted, cursor: 'pointer', fontSize: 9 }}>{copied === `p-${path}` ? '✓' : 'Path'}</button>
             </div>
           )}
         </div>
-        {hasChildren && isExpanded && (
-          <div style={{ borderLeft: `1px dashed ${t.border}`, marginLeft: 9, paddingLeft: 4 }}>
-            {type === 'array' ? data.map((item, i) => <VisualizerNode key={`${path}[${i}]`} data={item} path={`${path}[${i}]`} keyName={i} depth={depth + 1} />) : Object.entries(data).map(([key, value]) => <VisualizerNode key={`${path}.${key}`} data={value} path={`${path}.${key}`} keyName={key} depth={depth + 1} />)}
-            <div style={{ padding: '2px 8px', marginLeft: 18 }}><span style={{ color: t.bracket, fontFamily: "'JetBrains Mono', monospace", fontSize: 11 }}>{type === 'array' ? ']' : '}'}</span></div>
+        {hasKids && exp && (
+          <div style={{ borderLeft: `1px dashed ${t.border}`, marginLeft: 7, paddingLeft: 2 }}>
+            {type === 'array' ? data.map((x, i) => <VizNode key={`${path}[${i}]`} data={x} path={`${path}[${i}]`} keyName={i} depth={depth + 1} />) : Object.entries(data).map(([k, v]) => <VizNode key={`${path}.${k}`} data={v} path={`${path}.${k}`} keyName={k} depth={depth + 1} />)}
+            <div style={{ padding: '2px 6px', marginLeft: 16, fontFamily: 'monospace', fontSize: 11, color: t.bracket }}>{type === 'array' ? ']' : '}'}</div>
           </div>
         )}
       </div>
     );
   };
 
-  const InputPanel = ({ side, label, color, value, setter, parsed, height = 200 }) => (
-    <div style={{ background: t.bgSecondary, borderRadius: 12, border: `1px solid ${!parsed.valid && value ? t.error + '60' : t.border}`, overflow: 'hidden' }}>
-      <div style={{ padding: '10px 14px', background: t.bgTertiary, borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div style={{ width: 8, height: 8, borderRadius: '50%', background: color, boxShadow: `0 0 8px ${color}` }} />
-          <span style={{ fontSize: 12, fontWeight: 600, color: t.text }}>{label}</span>
-          {parsed.valid && value && <span style={{ fontSize: 10, color: t.success, background: t.successLight, padding: '2px 6px', borderRadius: 4 }}>✓ Valid</span>}
-          {parsed.wasFixed && <span style={{ fontSize: 10, color: t.warning, background: t.warningLight, padding: '2px 6px', borderRadius: 4 }}>Auto-fixed</span>}
+  // Input Panel
+  const InputPanel = ({ side, label, color, value, setter, parsed, height = 180 }) => (
+    <div style={{ background: t.bgSecondary, borderRadius: 10, border: `1px solid ${!parsed.valid && value ? t.error + '60' : t.border}`, overflow: 'hidden' }}>
+      <div style={{ padding: '8px 12px', background: t.bgTertiary, borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ width: 6, height: 6, borderRadius: '50%', background: color, boxShadow: `0 0 6px ${color}` }} />
+          <span style={{ fontSize: 11, fontWeight: 600, color: t.text }}>{label}</span>
+          {parsed.valid && value && parsed.format !== 'unknown' && <Badge format={parsed.format} />}
+          {parsed.valid && value && <span style={{ fontSize: 9, color: t.success, background: t.successLight, padding: '1px 5px', borderRadius: 3 }}>✓</span>}
+          {parsed.wasFixed && <span style={{ fontSize: 9, color: t.warning, background: t.warningLight, padding: '1px 5px', borderRadius: 3 }}>Fixed</span>}
         </div>
-        <div style={{ display: 'flex', gap: 4 }}>
-          <button onClick={() => formatJson(side)} style={{ padding: '4px 8px', background: t.bgHover, border: 'none', borderRadius: 4, color: t.textSecondary, cursor: 'pointer', fontSize: 10, fontWeight: 500 }}>Format</button>
-          <button onClick={() => minifyJson(side)} style={{ padding: '4px 8px', background: t.bgHover, border: 'none', borderRadius: 4, color: t.textSecondary, cursor: 'pointer', fontSize: 10, fontWeight: 500 }}>Minify</button>
-          <button onClick={() => sortKeys(side)} style={{ padding: '4px 8px', background: t.bgHover, border: 'none', borderRadius: 4, color: t.textSecondary, cursor: 'pointer', fontSize: 10, fontWeight: 500 }}>Sort</button>
-          <button onClick={() => copyToClipboard(parsed.valid ? JSON.stringify(parsed.data, null, 2) : value, side)} style={{ padding: '4px 8px', background: t.bgHover, border: 'none', borderRadius: 4, color: copied === side ? t.success : t.textSecondary, cursor: 'pointer', fontSize: 10, fontWeight: 500 }}>{copied === side ? '✓' : 'Copy'}</button>
+        <div style={{ display: 'flex', gap: 3 }}>
+          <button onClick={() => format(side)} style={{ padding: '3px 6px', background: t.bgHover, border: 'none', borderRadius: 3, color: t.textSecondary, cursor: 'pointer', fontSize: 9 }}>Format</button>
+          <button onClick={() => minify(side)} style={{ padding: '3px 6px', background: t.bgHover, border: 'none', borderRadius: 3, color: t.textSecondary, cursor: 'pointer', fontSize: 9 }}>Minify</button>
+          <button onClick={() => toJsonFmt(side)} style={{ padding: '3px 6px', background: 'rgba(96, 165, 250, 0.1)', border: 'none', borderRadius: 3, color: '#60a5fa', cursor: 'pointer', fontSize: 9 }}>→JSON</button>
+          <button onClick={() => toYamlFmt(side)} style={{ padding: '3px 6px', background: 'rgba(250, 204, 21, 0.1)', border: 'none', borderRadius: 3, color: '#facc15', cursor: 'pointer', fontSize: 9 }}>→YAML</button>
+          <button onClick={() => sortKeys(side)} style={{ padding: '3px 6px', background: t.bgHover, border: 'none', borderRadius: 3, color: t.textSecondary, cursor: 'pointer', fontSize: 9 }}>Sort</button>
+          <button onClick={() => copy(value, side)} style={{ padding: '3px 6px', background: t.bgHover, border: 'none', borderRadius: 3, color: copied === side ? t.success : t.textSecondary, cursor: 'pointer', fontSize: 9 }}>{copied === side ? '✓' : 'Copy'}</button>
         </div>
       </div>
-      <textarea value={value} onChange={e => setter(e.target.value)} placeholder={`Paste JSON here...\n\nSupports:\n• Standard JSON\n• Unquoted keys { name: "value" }\n• Single quotes\n• Trailing commas`} style={{ width: '100%', height, padding: 14, background: 'transparent', border: 'none', color: t.text, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.6, resize: 'none', outline: 'none' }} spellCheck={false} />
-      {!parsed.valid && value && <div style={{ padding: '10px 14px', background: t.errorLight, borderTop: `1px solid ${t.error}30`, color: t.error, fontSize: 11, display: 'flex', alignItems: 'center', gap: 8 }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>{parsed.line && <span style={{ opacity: 0.8 }}>Line {parsed.line}:</span>}{parsed.error}</div>}
+      <textarea value={value} onChange={e => setter(e.target.value)} placeholder="Paste JSON or YAML here..." style={{ width: '100%', height, padding: 10, background: 'transparent', border: 'none', color: t.text, fontSize: 11, fontFamily: 'monospace', lineHeight: 1.5, resize: 'none', outline: 'none' }} spellCheck={false} />
+      {!parsed.valid && value && <div style={{ padding: '8px 12px', background: t.errorLight, borderTop: `1px solid ${t.error}30`, color: t.error, fontSize: 10 }}>⚠ {parsed.line && `Line ${parsed.line}: `}{parsed.error}</div>}
     </div>
   );
 
-  return (
-    <div style={{ minHeight: '100vh', background: t.bg, fontFamily: "'Inter', -apple-system, sans-serif", color: t.text, transition: 'background 0.3s, color 0.3s' }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');*{box-sizing:border-box;}::-webkit-scrollbar{width:8px;height:8px;}::-webkit-scrollbar-track{background:${t.bgTertiary};}::-webkit-scrollbar-thumb{background:${t.textDim};border-radius:4px;}::-webkit-scrollbar-thumb:hover{background:${t.textMuted};}textarea::placeholder,input::placeholder{color:${t.textDim};}`}</style>
-      {theme === 'dark' && <div style={{ position: 'fixed', inset: 0, background: 'radial-gradient(ellipse at 20% 0%, rgba(99, 102, 241, 0.08) 0%, transparent 50%), radial-gradient(ellipse at 80% 100%, rgba(16, 185, 129, 0.06) 0%, transparent 50%)', pointerEvents: 'none' }} />}
+  const Btn = ({ children, onClick, active, color }) => (
+    <button onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 10px', background: active ? t.accentLight : 'transparent', border: 'none', borderRadius: 5, color: active ? t.accent : color || t.textMuted, cursor: 'pointer', fontSize: 10, fontWeight: 500 }}>{children}</button>
+  );
 
-      <header style={{ position: 'sticky', top: 0, zIndex: 50, padding: '12px 24px', background: theme === 'dark' ? 'rgba(3, 7, 18, 0.9)' : 'rgba(248, 250, 252, 0.95)', backdropFilter: 'blur(16px)', borderBottom: `1px solid ${t.border}` }}>
-        <div style={{ maxWidth: 1600, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div style={{ width: 36, height: 36, borderRadius: 10, background: 'linear-gradient(135deg, #6366f1 0%, #10b981 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 20px rgba(99, 102, 241, 0.3)' }}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" /></svg></div>
-            <div><h1 style={{ margin: 0, fontSize: 16, fontWeight: 700, letterSpacing: '-0.3px', color: t.text }}>JSON Toolkit</h1><p style={{ margin: 0, fontSize: 9, color: t.textMuted, letterSpacing: '0.5px', textTransform: 'uppercase' }}>Diff • Visualize • Validate</p></div>
+  return (
+    <div style={{ minHeight: '100vh', background: t.bg, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", color: t.text }}>
+      <style>{`*{box-sizing:border-box}::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:${t.bgTertiary}}::-webkit-scrollbar-thumb{background:${t.textDim};border-radius:3px}textarea::placeholder{color:${t.textDim}}`}</style>
+
+      {/* Header */}
+      <header style={{ position: 'sticky', top: 0, zIndex: 50, padding: '10px 20px', background: t.name === 'dark' ? 'rgba(10, 10, 15, 0.95)' : 'rgba(248, 250, 252, 0.95)', backdropFilter: 'blur(12px)', borderBottom: `1px solid ${t.border}` }}>
+        <div style={{ maxWidth: 1400, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ width: 32, height: 32, borderRadius: 8, background: 'linear-gradient(135deg, #6366f1, #10b981)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>⚡</div>
+            <div>
+              <h1 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: t.text }}>JSON/YAML Toolkit</h1>
+              <p style={{ margin: 0, fontSize: 9, color: t.textMuted }}>Diff • Convert • Visualize • Validate</p>
+            </div>
           </div>
-          <div style={{ display: 'flex', gap: 2, background: t.bgTertiary, padding: 3, borderRadius: 8 }}>
-            {[{ id: 'diff', label: 'Diff', icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M16 3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2V8l-5-5z"/><path d="M15 3v6h6"/></svg> }, { id: 'visualizer', label: 'Visualizer', icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v6m0 6v10M1 12h6m6 0h10"/></svg> }, { id: 'validate', label: 'Validate', icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg> }].map(tab => (
-              <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 12px', background: activeTab === tab.id ? t.accentLight : 'transparent', border: 'none', borderRadius: 6, color: activeTab === tab.id ? t.accent : t.textMuted, cursor: 'pointer', fontSize: 11, fontWeight: 500, transition: 'all 0.15s' }}>{tab.icon}{tab.label}</button>
+
+          {/* Tabs */}
+          <div style={{ display: 'flex', gap: 2, background: t.bgTertiary, padding: 3, borderRadius: 6 }}>
+            {[{ id: 'diff', label: 'Diff' }, { id: 'converter', label: 'Convert' }, { id: 'visualizer', label: 'Visualize' }, { id: 'validate', label: 'Validate' }].map(tab => (
+              <Btn key={tab.id} onClick={() => setActiveTab(tab.id)} active={activeTab === tab.id}>{tab.label}</Btn>
             ))}
           </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} style={{ width: 34, height: 34, borderRadius: 8, background: t.bgTertiary, border: `1px solid ${t.border}`, color: t.textSecondary, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s' }} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}>{theme === 'dark' ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg> : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>}</button>
-            <button onClick={loadSample} style={{ padding: '7px 12px', background: t.accentLight, border: `1px solid ${t.accent}30`, borderRadius: 6, color: t.accent, cursor: 'pointer', fontSize: 11, fontWeight: 500 }}>Sample</button>
-            {activeTab === 'diff' && <button onClick={swapPanels} style={{ padding: '7px 12px', background: t.successLight, border: `1px solid ${t.success}30`, borderRadius: 6, color: t.success, cursor: 'pointer', fontSize: 11, fontWeight: 500 }}>⇄ Swap</button>}
-            <button onClick={clearAll} style={{ padding: '7px 12px', background: t.errorLight, border: `1px solid ${t.error}30`, borderRadius: 6, color: t.error, cursor: 'pointer', fontSize: 11, fontWeight: 500 }}>Clear</button>
+
+          {/* Actions */}
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <button onClick={() => setTheme(t.name === 'dark' ? 'light' : 'dark')} style={{ width: 30, height: 30, borderRadius: 6, background: t.bgTertiary, border: `1px solid ${t.border}`, color: t.textSecondary, cursor: 'pointer' }}>{t.name === 'dark' ? '☀️' : '🌙'}</button>
+            <button onClick={loadSample} style={{ padding: '6px 10px', background: t.accentLight, border: `1px solid ${t.accent}30`, borderRadius: 5, color: t.accent, cursor: 'pointer', fontSize: 10, fontWeight: 500 }}>Sample</button>
+            {activeTab === 'diff' && <button onClick={swap} style={{ padding: '6px 10px', background: t.successLight, border: `1px solid ${t.success}30`, borderRadius: 5, color: t.success, cursor: 'pointer', fontSize: 10, fontWeight: 500 }}>⇄ Swap</button>}
+            <button onClick={clear} style={{ padding: '6px 10px', background: t.errorLight, border: `1px solid ${t.error}30`, borderRadius: 5, color: t.error, cursor: 'pointer', fontSize: 10, fontWeight: 500 }}>Clear</button>
           </div>
         </div>
       </header>
 
-      <main style={{ position: 'relative', maxWidth: 1600, margin: '0 auto', padding: '20px 24px' }}>
+      <main style={{ maxWidth: 1400, margin: '0 auto', padding: '16px 20px' }}>
+        
+        {/* DIFF TAB */}
         {activeTab === 'diff' && (
           <>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
-              <InputPanel side="left" label="Original / Base" color="#f87171" value={leftJson} setter={setLeftJson} parsed={leftParsed} />
-              <InputPanel side="right" label="New / Compare" color="#4ade80" value={rightJson} setter={setRightJson} parsed={rightParsed} />
+            <div style={{ background: t.accentLight, border: `1px solid ${t.accent}30`, borderRadius: 6, padding: '8px 12px', marginBottom: 12, fontSize: 11, color: t.accent }}>
+              💡 Supports both <strong>JSON</strong> and <strong>YAML</strong> — auto-detected! Compare JSON vs YAML too.
             </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+              <InputPanel side="left" label="Original" color="#f87171" value={leftJson} setter={setLeftJson} parsed={leftParsed} />
+              <InputPanel side="right" label="New" color="#4ade80" value={rightJson} setter={setRightJson} parsed={rightParsed} />
+            </div>
+
             {diffTree && (stats.added + stats.removed + stats.modified + stats.type_changed) > 0 && (
-              <div style={{ display: 'flex', gap: 12, padding: '12px 18px', background: `linear-gradient(135deg, ${t.accentLight} 0%, ${t.successLight} 100%)`, borderRadius: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', border: `1px solid ${t.accent}20` }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}><span style={{ fontSize: 26, fontWeight: 800, color: t.accent }}>{stats.added + stats.removed + stats.modified + stats.type_changed}</span><span style={{ color: t.textMuted, fontSize: 12 }}>changes</span></div>
-                  <div style={{ height: 22, width: 1, background: t.border }} />
-                  <div style={{ display: 'flex', gap: 10 }}>{[{ count: stats.added, color: t.success, label: 'Added' }, { count: stats.removed, color: t.error, label: 'Removed' }, { count: stats.modified, color: t.warning, label: 'Changed' }, { count: stats.type_changed, color: '#c084fc', label: 'Type' }].filter(s => s.count > 0).map(s => <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}><div style={{ width: 7, height: 7, borderRadius: 2, background: s.color }} /><span style={{ color: s.color, fontWeight: 700, fontSize: 13 }}>{s.count}</span><span style={{ color: t.textMuted, fontSize: 10 }}>{s.label}</span></div>)}</div>
-                </div>
+              <div style={{ display: 'flex', gap: 10, padding: '10px 14px', background: t.accentLight, borderRadius: 8, marginBottom: 12, alignItems: 'center', border: `1px solid ${t.accent}20` }}>
+                <span style={{ fontSize: 22, fontWeight: 800, color: t.accent }}>{stats.added + stats.removed + stats.modified + stats.type_changed}</span>
+                <span style={{ color: t.textMuted, fontSize: 11 }}>changes</span>
+                <div style={{ width: 1, height: 20, background: t.border, margin: '0 8px' }} />
+                {[{ n: stats.added, c: t.success, l: 'Added' }, { n: stats.removed, c: t.error, l: 'Removed' }, { n: stats.modified, c: t.warning, l: 'Changed' }].filter(x => x.n > 0).map(x => (
+                  <div key={x.l} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <div style={{ width: 6, height: 6, borderRadius: 2, background: x.c }} />
+                    <span style={{ color: x.c, fontWeight: 700, fontSize: 12 }}>{x.n}</span>
+                    <span style={{ color: t.textMuted, fontSize: 10 }}>{x.l}</span>
+                  </div>
+                ))}
               </div>
             )}
+
             {diffTree && (
-              <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
-                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                  <button onClick={expandAll} style={{ padding: '5px 10px', background: t.bgSecondary, border: `1px solid ${t.border}`, borderRadius: 5, color: t.textSecondary, cursor: 'pointer', fontSize: 10, fontWeight: 500 }}>Expand All</button>
-                  <button onClick={expandDiffs} style={{ padding: '5px 10px', background: t.accentLight, border: `1px solid ${t.accent}30`, borderRadius: 5, color: t.accent, cursor: 'pointer', fontSize: 10, fontWeight: 500 }}>Expand Changes</button>
-                  <button onClick={collapseAll} style={{ padding: '5px 10px', background: t.bgSecondary, border: `1px solid ${t.border}`, borderRadius: 5, color: t.textSecondary, cursor: 'pointer', fontSize: 10, fontWeight: 500 }}>Collapse</button>
-                  <div style={{ height: 18, width: 1, background: t.border }} />
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}><input type="checkbox" checked={showOnlyDiffs} onChange={e => setShowOnlyDiffs(e.target.checked)} style={{ accentColor: t.accent }} /><span style={{ fontSize: 10, color: t.textSecondary }}>Only changes</span></label>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 10, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                  <button onClick={expandAll} style={{ padding: '4px 8px', background: t.bgSecondary, border: `1px solid ${t.border}`, borderRadius: 4, color: t.textSecondary, cursor: 'pointer', fontSize: 9 }}>Expand All</button>
+                  <button onClick={expandDiffs} style={{ padding: '4px 8px', background: t.accentLight, border: `1px solid ${t.accent}30`, borderRadius: 4, color: t.accent, cursor: 'pointer', fontSize: 9 }}>Expand Changes</button>
+                  <button onClick={() => setExpandedNodes(new Set(['$']))} style={{ padding: '4px 8px', background: t.bgSecondary, border: `1px solid ${t.border}`, borderRadius: 4, color: t.textSecondary, cursor: 'pointer', fontSize: 9 }}>Collapse</button>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 8, cursor: 'pointer' }}>
+                    <input type="checkbox" checked={showOnlyDiffs} onChange={e => setShowOnlyDiffs(e.target.checked)} style={{ accentColor: t.accent }} />
+                    <span style={{ fontSize: 9, color: t.textSecondary }}>Only changes</span>
+                  </label>
                 </div>
-                <div style={{ position: 'relative' }}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={t.textMuted} strokeWidth="2" style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)' }}><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg><input type="text" placeholder="Search..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} style={{ padding: '5px 10px 5px 28px', background: t.bgSecondary, border: `1px solid ${t.border}`, borderRadius: 5, color: t.text, fontSize: 10, width: 150, outline: 'none' }} /></div>
+                <input type="text" placeholder="Search..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} style={{ padding: '4px 8px', background: t.bgSecondary, border: `1px solid ${t.border}`, borderRadius: 4, color: t.text, fontSize: 9, width: 120, outline: 'none' }} />
               </div>
             )}
-            <div style={{ background: t.bgSecondary, borderRadius: 10, border: `1px solid ${t.border}`, overflow: 'hidden' }}>
-              <div style={{ display: 'flex', padding: '9px 12px', background: t.bgTertiary, borderBottom: `1px solid ${t.border}`, fontSize: 9, fontWeight: 600, color: t.textMuted, textTransform: 'uppercase', letterSpacing: '0.5px' }}><div style={{ width: 22 }} /><div style={{ minWidth: 100, maxWidth: 180, paddingRight: 10 }}>Key</div><div style={{ flex: 1, display: 'flex', gap: 12 }}><div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 5 }}><div style={{ width: 5, height: 5, borderRadius: 2, background: t.error }} />Left</div><div style={{ width: 20 }} /><div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 5 }}><div style={{ width: 5, height: 5, borderRadius: 2, background: t.success }} />Right</div></div></div>
-              <div style={{ padding: 10, maxHeight: 450, overflow: 'auto' }}>
+
+            <div style={{ background: t.bgSecondary, borderRadius: 8, border: `1px solid ${t.border}`, overflow: 'hidden' }}>
+              <div style={{ display: 'flex', padding: '8px 10px', background: t.bgTertiary, borderBottom: `1px solid ${t.border}`, fontSize: 9, fontWeight: 600, color: t.textMuted }}>
+                <div style={{ width: 20 }} />
+                <div style={{ minWidth: 90, maxWidth: 160, paddingRight: 8 }}>Key</div>
+                <div style={{ flex: 1, display: 'flex', gap: 8 }}>
+                  <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 4 }}><div style={{ width: 4, height: 4, borderRadius: 1, background: t.error }} />Left</div>
+                  <div style={{ width: 16 }} />
+                  <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 4 }}><div style={{ width: 4, height: 4, borderRadius: 1, background: t.success }} />Right</div>
+                </div>
+              </div>
+              <div style={{ padding: 8, maxHeight: 400, overflow: 'auto' }}>
                 {!leftParsed.data && !rightParsed.data ? (
-                  <div style={{ textAlign: 'center', padding: 50, color: t.textMuted }}><div style={{ width: 56, height: 56, borderRadius: 14, background: t.bgTertiary, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px' }}><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={t.textMuted} strokeWidth="1.5"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg></div><p style={{ fontSize: 13, fontWeight: 500, marginBottom: 5, color: t.text }}>Ready to Compare</p><p style={{ fontSize: 11, marginBottom: 14 }}>Paste JSON in both panels</p><button onClick={loadSample} style={{ padding: '8px 16px', background: `linear-gradient(135deg, ${t.accent} 0%, #10b981 100%)`, border: 'none', borderRadius: 6, color: 'white', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>Try Sample</button></div>
-                ) : diffTree && (stats.added + stats.removed + stats.modified + stats.type_changed) === 0 ? (
-                  <div style={{ textAlign: 'center', padding: 50 }}><div style={{ width: 56, height: 56, borderRadius: '50%', background: t.successLight, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px' }}><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={t.success} strokeWidth="2"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg></div><p style={{ fontSize: 15, fontWeight: 600, color: t.success }}>Identical!</p><p style={{ fontSize: 11, color: t.textMuted }}>Both JSON objects match</p></div>
-                ) : diffTree ? <TreeNode node={diffTree} /> : null}
+                  <div style={{ textAlign: 'center', padding: 40, color: t.textMuted }}>
+                    <p style={{ fontSize: 12, fontWeight: 500, color: t.text, marginBottom: 4 }}>Ready to Compare</p>
+                    <p style={{ fontSize: 10, marginBottom: 12 }}>Paste JSON or YAML in both panels</p>
+                    <button onClick={loadSample} style={{ padding: '8px 14px', background: `linear-gradient(135deg, ${t.accent}, #10b981)`, border: 'none', borderRadius: 5, color: 'white', cursor: 'pointer', fontSize: 10, fontWeight: 600 }}>Try Sample</button>
+                  </div>
+                ) : diffTree && !stats.added && !stats.removed && !stats.modified && !stats.type_changed ? (
+                  <div style={{ textAlign: 'center', padding: 40 }}>
+                    <div style={{ fontSize: 32, marginBottom: 8 }}>✅</div>
+                    <p style={{ fontSize: 14, fontWeight: 600, color: t.success }}>Identical!</p>
+                    <p style={{ fontSize: 10, color: t.textMuted }}>Both objects match</p>
+                  </div>
+                ) : diffTree ? <DiffNode node={diffTree} /> : null}
               </div>
             </div>
           </>
         )}
 
+        {/* CONVERTER TAB */}
+        {activeTab === 'converter' && (
+          <>
+            <div style={{ background: 'linear-gradient(135deg, rgba(96, 165, 250, 0.1), rgba(250, 204, 21, 0.1))', border: `1px solid ${t.border}`, borderRadius: 6, padding: '10px 14px', marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 11, color: t.text }}>🔄 Convert between <span style={{ color: '#60a5fa', fontWeight: 600 }}>JSON</span> and <span style={{ color: '#facc15', fontWeight: 600 }}>YAML</span></span>
+              <div style={{ display: 'flex', gap: 4 }}>
+                <button onClick={() => setOutputFormat('json')} style={{ padding: '5px 10px', background: outputFormat === 'json' ? 'rgba(96, 165, 250, 0.2)' : t.bgTertiary, border: `1px solid ${outputFormat === 'json' ? 'rgba(96, 165, 250, 0.4)' : t.border}`, borderRadius: 5, color: outputFormat === 'json' ? '#60a5fa' : t.textMuted, cursor: 'pointer', fontSize: 10, fontWeight: 600 }}>→ JSON</button>
+                <button onClick={() => setOutputFormat('yaml')} style={{ padding: '5px 10px', background: outputFormat === 'yaml' ? 'rgba(250, 204, 21, 0.2)' : t.bgTertiary, border: `1px solid ${outputFormat === 'yaml' ? 'rgba(250, 204, 21, 0.4)' : t.border}`, borderRadius: 5, color: outputFormat === 'yaml' ? '#facc15' : t.textMuted, cursor: 'pointer', fontSize: 10, fontWeight: 600 }}>→ YAML</button>
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <InputPanel side="conv" label="Input (JSON or YAML)" color={t.accent} value={converterInput} setter={setConverterInput} parsed={convParsed} height={300} />
+              <div style={{ background: t.bgSecondary, borderRadius: 10, border: `1px solid ${t.border}`, overflow: 'hidden' }}>
+                <div style={{ padding: '8px 12px', background: t.bgTertiary, borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div style={{ width: 6, height: 6, borderRadius: '50%', background: outputFormat === 'yaml' ? '#facc15' : '#60a5fa' }} />
+                    <span style={{ fontSize: 11, fontWeight: 600, color: t.text }}>Output</span>
+                    <Badge format={outputFormat} />
+                  </div>
+                  <button onClick={() => copy(converterOutput, 'out')} style={{ padding: '3px 6px', background: t.bgHover, border: 'none', borderRadius: 3, color: copied === 'out' ? t.success : t.textSecondary, cursor: 'pointer', fontSize: 9 }}>{copied === 'out' ? '✓' : 'Copy'}</button>
+                </div>
+                <textarea value={converterOutput} readOnly placeholder="Converted output..." style={{ width: '100%', height: 300, padding: 10, background: 'transparent', border: 'none', color: t.text, fontSize: 11, fontFamily: 'monospace', lineHeight: 1.5, resize: 'none', outline: 'none' }} />
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* VISUALIZER TAB */}
         {activeTab === 'visualizer' && (
           <>
-            <div style={{ marginBottom: 18 }}><InputPanel side="viz" label="JSON Input" color={t.accent} value={visualizerJson} setter={setVisualizerJson} parsed={vizParsed} height={160} /></div>
+            <div style={{ marginBottom: 14 }}>
+              <InputPanel side="viz" label="JSON or YAML Input" color={t.accent} value={visualizerJson} setter={setVisualizerJson} parsed={vizParsed} height={140} />
+            </div>
             {vizParsed.valid && vizParsed.data && (
               <>
-                {vizStats && <div style={{ display: 'flex', gap: 6, padding: '10px 14px', background: t.bgSecondary, borderRadius: 8, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center', border: `1px solid ${t.border}` }}>{[{ label: 'Objects', value: vizStats.objects, color: t.bracket }, { label: 'Arrays', value: vizStats.arrays, color: '#7dd3fc' }, { label: 'Strings', value: vizStats.strings, color: t.string }, { label: 'Numbers', value: vizStats.numbers, color: t.number }, { label: 'Booleans', value: vizStats.booleans, color: t.boolean }, { label: 'Keys', value: vizStats.totalKeys, color: t.key }, { label: 'Depth', value: vizStats.maxDepth, color: t.accent }].map(stat => <div key={stat.label} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '3px 8px', background: t.bgTertiary, borderRadius: 5 }}><span style={{ color: stat.color, fontWeight: 700, fontSize: 12 }}>{stat.value}</span><span style={{ color: t.textMuted, fontSize: 9, textTransform: 'uppercase' }}>{stat.label}</span></div>)}</div>}
-                <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <button onClick={expandAllViz} style={{ padding: '5px 10px', background: t.bgSecondary, border: `1px solid ${t.border}`, borderRadius: 5, color: t.textSecondary, cursor: 'pointer', fontSize: 10, fontWeight: 500 }}>Expand All</button>
-                    <button onClick={collapseAllViz} style={{ padding: '5px 10px', background: t.bgSecondary, border: `1px solid ${t.border}`, borderRadius: 5, color: t.textSecondary, cursor: 'pointer', fontSize: 10, fontWeight: 500 }}>Collapse</button>
-                    <div style={{ height: 18, width: 1, background: t.border }} />
-                    <span style={{ fontSize: 10, color: t.textMuted }}>Level:</span>
-                    {[1, 2, 3, 4, 5].map(level => <button key={level} onClick={() => expandToLevel(level)} style={{ width: 24, height: 24, padding: 0, background: t.bgSecondary, border: `1px solid ${t.border}`, borderRadius: 5, color: t.textSecondary, cursor: 'pointer', fontSize: 10, fontWeight: 600 }}>{level}</button>)}
+                {vizStats && (
+                  <div style={{ display: 'flex', gap: 5, padding: '8px 12px', background: t.bgSecondary, borderRadius: 6, marginBottom: 12, flexWrap: 'wrap', border: `1px solid ${t.border}` }}>
+                    {[{ l: 'Objects', v: vizStats.objects, c: t.bracket }, { l: 'Arrays', v: vizStats.arrays, c: '#7dd3fc' }, { l: 'Strings', v: vizStats.strings, c: t.string }, { l: 'Numbers', v: vizStats.numbers, c: t.number }, { l: 'Keys', v: vizStats.totalKeys, c: t.key }, { l: 'Depth', v: vizStats.maxDepth, c: t.accent }].map(s => (
+                      <div key={s.l} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '2px 6px', background: t.bgTertiary, borderRadius: 4 }}>
+                        <span style={{ color: s.c, fontWeight: 700, fontSize: 11 }}>{s.v}</span>
+                        <span style={{ color: t.textMuted, fontSize: 8, textTransform: 'uppercase' }}>{s.l}</span>
+                      </div>
+                    ))}
                   </div>
-                  <div style={{ position: 'relative' }}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={t.textMuted} strokeWidth="2" style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)' }}><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg><input type="text" placeholder="Search keys, values..." value={vizSearchTerm} onChange={e => setVizSearchTerm(e.target.value)} style={{ padding: '5px 10px 5px 28px', background: t.bgSecondary, border: `1px solid ${t.border}`, borderRadius: 5, color: t.text, fontSize: 10, width: 180, outline: 'none' }} /></div>
+                )}
+                <div style={{ display: 'flex', gap: 4, marginBottom: 10, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                    <button onClick={expandVizAll} style={{ padding: '4px 8px', background: t.bgSecondary, border: `1px solid ${t.border}`, borderRadius: 4, color: t.textSecondary, cursor: 'pointer', fontSize: 9 }}>Expand All</button>
+                    <button onClick={() => setVizExpanded(new Set(['$']))} style={{ padding: '4px 8px', background: t.bgSecondary, border: `1px solid ${t.border}`, borderRadius: 4, color: t.textSecondary, cursor: 'pointer', fontSize: 9 }}>Collapse</button>
+                    <span style={{ fontSize: 9, color: t.textMuted, marginLeft: 4 }}>Level:</span>
+                    {[1, 2, 3, 4].map(l => <button key={l} onClick={() => expandToLevel(l)} style={{ width: 22, height: 22, background: t.bgSecondary, border: `1px solid ${t.border}`, borderRadius: 4, color: t.textSecondary, cursor: 'pointer', fontSize: 9, fontWeight: 600 }}>{l}</button>)}
+                  </div>
+                  <input type="text" placeholder="Search..." value={vizSearch} onChange={e => setVizSearch(e.target.value)} style={{ padding: '4px 8px', background: t.bgSecondary, border: `1px solid ${t.border}`, borderRadius: 4, color: t.text, fontSize: 9, width: 140, outline: 'none' }} />
                 </div>
-                <div style={{ background: t.bgSecondary, borderRadius: 10, border: `1px solid ${t.border}`, overflow: 'hidden' }}>
-                  <div style={{ padding: '9px 12px', background: t.bgTertiary, borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}><span style={{ fontSize: 11, fontWeight: 600, color: t.text }}>JSON Tree</span><div style={{ display: 'flex', gap: 10, fontSize: 9, color: t.textMuted }}><span><span style={{ color: t.key }}>●</span> Key</span><span><span style={{ color: t.string }}>●</span> String</span><span><span style={{ color: t.number }}>●</span> Number</span><span><span style={{ color: t.boolean }}>●</span> Bool</span><span><span style={{ color: t.null }}>●</span> Null</span></div></div>
-                  <div style={{ padding: 10, maxHeight: 500, overflow: 'auto' }}><VisualizerNode data={vizParsed.data} /></div>
+                <div style={{ background: t.bgSecondary, borderRadius: 8, border: `1px solid ${t.border}`, overflow: 'hidden' }}>
+                  <div style={{ padding: '8px 10px', background: t.bgTertiary, borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span style={{ fontSize: 10, fontWeight: 600, color: t.text }}>Tree View</span>
+                    <div style={{ display: 'flex', gap: 8, fontSize: 9, color: t.textMuted }}>
+                      <span><span style={{ color: t.key }}>●</span> Key</span>
+                      <span><span style={{ color: t.string }}>●</span> String</span>
+                      <span><span style={{ color: t.number }}>●</span> Number</span>
+                      <span><span style={{ color: t.boolean }}>●</span> Bool</span>
+                    </div>
+                  </div>
+                  <div style={{ padding: 8, maxHeight: 400, overflow: 'auto' }}><VizNode data={vizParsed.data} /></div>
                 </div>
               </>
             )}
-            {!vizParsed.data && <div style={{ background: t.bgSecondary, borderRadius: 10, border: `1px solid ${t.border}`, padding: 50, textAlign: 'center' }}><div style={{ width: 56, height: 56, borderRadius: 14, background: t.bgTertiary, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px' }}><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={t.textMuted} strokeWidth="1.5"><circle cx="12" cy="12" r="3"/><path d="M12 1v6m0 6v10M1 12h6m6 0h10"/></svg></div><p style={{ fontSize: 13, fontWeight: 500, marginBottom: 5, color: t.text }}>Visualize JSON</p><p style={{ fontSize: 11, marginBottom: 14, color: t.textMuted }}>Paste JSON to explore interactively</p><button onClick={loadSample} style={{ padding: '8px 16px', background: `linear-gradient(135deg, ${t.accent} 0%, #10b981 100%)`, border: 'none', borderRadius: 6, color: 'white', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>Load Sample</button></div>}
+            {!vizParsed.data && (
+              <div style={{ background: t.bgSecondary, borderRadius: 8, border: `1px solid ${t.border}`, padding: 40, textAlign: 'center' }}>
+                <p style={{ fontSize: 12, fontWeight: 500, color: t.text, marginBottom: 4 }}>Visualize Data</p>
+                <p style={{ fontSize: 10, color: t.textMuted, marginBottom: 12 }}>Paste JSON or YAML to explore</p>
+                <button onClick={loadSample} style={{ padding: '8px 14px', background: `linear-gradient(135deg, ${t.accent}, #10b981)`, border: 'none', borderRadius: 5, color: 'white', cursor: 'pointer', fontSize: 10, fontWeight: 600 }}>Load Sample</button>
+              </div>
+            )}
           </>
         )}
 
+        {/* VALIDATE TAB */}
         {activeTab === 'validate' && (
-          <div style={{ maxWidth: 700, margin: '0 auto' }}>
-            <InputPanel side="viz" label="JSON to Validate" color={t.accent} value={visualizerJson} setter={setVisualizerJson} parsed={vizParsed} height={180} />
-            <div style={{ marginTop: 18, background: t.bgSecondary, borderRadius: 10, border: `1px solid ${t.border}`, overflow: 'hidden' }}>
-              <div style={{ padding: '10px 14px', background: t.bgTertiary, borderBottom: `1px solid ${t.border}` }}><span style={{ fontSize: 11, fontWeight: 600, color: t.text }}>Validation Result</span></div>
-              <div style={{ padding: 20 }}>
+          <div style={{ maxWidth: 600, margin: '0 auto' }}>
+            <InputPanel side="viz" label="JSON or YAML to Validate" color={t.accent} value={visualizerJson} setter={setVisualizerJson} parsed={vizParsed} height={160} />
+            <div style={{ marginTop: 14, background: t.bgSecondary, borderRadius: 8, border: `1px solid ${t.border}`, overflow: 'hidden' }}>
+              <div style={{ padding: '8px 12px', background: t.bgTertiary, borderBottom: `1px solid ${t.border}` }}>
+                <span style={{ fontSize: 10, fontWeight: 600, color: t.text }}>Validation Result</span>
+              </div>
+              <div style={{ padding: 16 }}>
                 {!visualizerJson.trim() ? (
-                  <div style={{ textAlign: 'center', padding: 35, color: t.textMuted }}><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ margin: '0 auto 14px' }}><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg><p style={{ fontSize: 12 }}>Enter JSON above to validate</p></div>
+                  <div style={{ textAlign: 'center', padding: 30, color: t.textMuted }}>
+                    <p style={{ fontSize: 11 }}>Enter JSON or YAML to validate</p>
+                  </div>
                 ) : vizParsed.valid ? (
                   <div style={{ textAlign: 'center' }}>
-                    <div style={{ width: 70, height: 70, borderRadius: '50%', background: t.successLight, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 18px', border: `3px solid ${t.success}` }}><svg width="35" height="35" viewBox="0 0 24 24" fill="none" stroke={t.success} strokeWidth="2.5"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg></div>
-                    <h3 style={{ margin: 0, color: t.success, fontSize: 20, fontWeight: 700 }}>Valid JSON!</h3>
-                    {vizParsed.wasFixed && <p style={{ margin: '10px 0 0', color: t.warning, fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>Auto-corrected: Added quotes to keys</p>}
-                    {vizStats && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginTop: 22 }}>{[{ label: 'Objects', value: vizStats.objects, icon: '{ }' }, { label: 'Arrays', value: vizStats.arrays, icon: '[ ]' }, { label: 'Keys', value: vizStats.totalKeys, icon: '🔑' }, { label: 'Depth', value: vizStats.maxDepth, icon: '📊' }].map(stat => <div key={stat.label} style={{ padding: 14, background: t.bgTertiary, borderRadius: 8 }}><div style={{ fontSize: 20, marginBottom: 3 }}>{stat.icon}</div><div style={{ fontSize: 24, fontWeight: 700, color: t.text }}>{stat.value}</div><div style={{ fontSize: 10, color: t.textMuted, textTransform: 'uppercase' }}>{stat.label}</div></div>)}</div>}
-                    <div style={{ marginTop: 20, padding: 14, background: t.bgTertiary, borderRadius: 8, textAlign: 'left' }}><div style={{ fontSize: 10, color: t.textMuted, textTransform: 'uppercase', marginBottom: 6 }}>Size Info</div><div style={{ display: 'flex', gap: 20, fontSize: 12 }}><div><span style={{ color: t.textMuted }}>Chars:</span> <span style={{ color: t.text, fontWeight: 600 }}>{JSON.stringify(vizParsed.data).length.toLocaleString()}</span></div><div><span style={{ color: t.textMuted }}>Lines:</span> <span style={{ color: t.text, fontWeight: 600 }}>{visualizerJson.split('\n').length}</span></div></div></div>
+                    <div style={{ fontSize: 48, marginBottom: 8 }}>✅</div>
+                    <h3 style={{ margin: 0, color: t.success, fontSize: 18, fontWeight: 700 }}>Valid {vizParsed.format === 'yaml' ? 'YAML' : 'JSON'}!</h3>
+                    {vizParsed.wasFixed && <p style={{ margin: '8px 0 0', color: t.warning, fontSize: 11 }}>⚠ Auto-corrected: Added quotes to keys</p>}
+                    {vizStats && (
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginTop: 16 }}>
+                        {[{ l: 'Objects', v: vizStats.objects }, { l: 'Arrays', v: vizStats.arrays }, { l: 'Keys', v: vizStats.totalKeys }, { l: 'Depth', v: vizStats.maxDepth }].map(s => (
+                          <div key={s.l} style={{ padding: 10, background: t.bgTertiary, borderRadius: 6 }}>
+                            <div style={{ fontSize: 20, fontWeight: 700, color: t.text }}>{s.v}</div>
+                            <div style={{ fontSize: 9, color: t.textMuted, textTransform: 'uppercase' }}>{s.l}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 18, background: t.errorLight, borderRadius: 10, border: `1px solid ${t.error}30`, marginBottom: 18 }}>
-                      <div style={{ width: 50, height: 50, borderRadius: '50%', background: `${t.error}20`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, border: `2px solid ${t.error}` }}><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={t.error} strokeWidth="2"><circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" /></svg></div>
-                      <div><h4 style={{ margin: 0, color: t.error, fontSize: 16, fontWeight: 600 }}>Invalid JSON</h4><p style={{ margin: '4px 0 0', color: theme === 'dark' ? '#fca5a5' : '#b91c1c', fontSize: 12 }}>{vizParsed.error}</p></div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 14, background: t.errorLight, borderRadius: 8, border: `1px solid ${t.error}30` }}>
+                      <div style={{ fontSize: 32 }}>❌</div>
+                      <div>
+                        <h4 style={{ margin: 0, color: t.error, fontSize: 14, fontWeight: 600 }}>Invalid {detectFormat(visualizerJson) === 'yaml' ? 'YAML' : 'JSON'}</h4>
+                        <p style={{ margin: '4px 0 0', color: t.error, fontSize: 11, opacity: 0.8 }}>{vizParsed.error}</p>
+                      </div>
                     </div>
                     {vizParsed.line && (
-                      <div><div style={{ fontSize: 10, color: t.textMuted, textTransform: 'uppercase', marginBottom: 6, fontWeight: 600 }}>Error Location</div>
-                        <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, background: t.bgTertiary, borderRadius: 6, overflow: 'hidden', border: `1px solid ${t.border}` }}>
-                          {visualizerJson.split('\n').slice(Math.max(0, vizParsed.line - 3), vizParsed.line + 2).map((line, idx) => { const lineNum = Math.max(1, vizParsed.line - 2) + idx; const isErrorLine = lineNum === vizParsed.line; return <div key={idx} style={{ display: 'flex', background: isErrorLine ? t.errorLight : 'transparent' }}><span style={{ width: 45, padding: '5px 10px', color: isErrorLine ? t.error : t.textDim, background: t.bgTertiary, textAlign: 'right', borderRight: isErrorLine ? `3px solid ${t.error}` : `3px solid transparent`, fontWeight: isErrorLine ? 700 : 400 }}>{lineNum}</span><span style={{ padding: '5px 10px', color: isErrorLine ? t.error : t.textSecondary, flex: 1, whiteSpace: 'pre' }}>{line || ' '}</span></div>; })}
+                      <div style={{ marginTop: 12 }}>
+                        <div style={{ fontSize: 9, color: t.textMuted, marginBottom: 4, fontWeight: 600 }}>ERROR LOCATION</div>
+                        <div style={{ fontFamily: 'monospace', fontSize: 10, background: t.bgTertiary, borderRadius: 4, overflow: 'hidden', border: `1px solid ${t.border}` }}>
+                          {visualizerJson.split('\n').slice(Math.max(0, vizParsed.line - 3), vizParsed.line + 2).map((line, i) => {
+                            const num = Math.max(1, vizParsed.line - 2) + i;
+                            const isErr = num === vizParsed.line;
+                            return (
+                              <div key={i} style={{ display: 'flex', background: isErr ? t.errorLight : 'transparent' }}>
+                                <span style={{ width: 36, padding: '4px 8px', color: isErr ? t.error : t.textDim, background: t.bgTertiary, textAlign: 'right', borderRight: isErr ? `2px solid ${t.error}` : '2px solid transparent', fontWeight: isErr ? 700 : 400 }}>{num}</span>
+                                <span style={{ padding: '4px 8px', color: isErr ? t.error : t.textSecondary, whiteSpace: 'pre' }}>{line || ' '}</span>
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
                     )}
@@ -552,12 +897,21 @@ export default function JsonToolkit() {
           </div>
         )}
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10, marginTop: 26 }}>
-          {[{ icon: '🌳', title: 'Tree Diff', desc: 'Visual hierarchy comparison' }, { icon: '🔍', title: 'Visualizer', desc: 'Interactive JSON explorer' }, { icon: '✅', title: 'Validator', desc: 'Detailed error reporting' }, { icon: '🔧', title: 'Auto-Fix', desc: 'Handles loose JSON syntax' }, { icon: '🌓', title: 'Themes', desc: 'Dark & light modes' }].map((f, i) => <div key={i} style={{ padding: 12, background: t.bgSecondary, borderRadius: 8, border: `1px solid ${t.border}` }}><div style={{ fontSize: 18, marginBottom: 6 }}>{f.icon}</div><h3 style={{ margin: 0, fontSize: 11, fontWeight: 600, marginBottom: 3, color: t.text }}>{f.title}</h3><p style={{ margin: 0, fontSize: 9, color: t.textMuted, lineHeight: 1.4 }}>{f.desc}</p></div>)}
+        {/* Features */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 8, marginTop: 20 }}>
+          {[{ i: '🔄', t: 'JSON↔YAML', d: 'Convert formats' }, { i: '🌳', t: 'Tree Diff', d: 'Visual compare' }, { i: '🔍', t: 'Visualize', d: 'Explore data' }, { i: '✅', t: 'Validate', d: 'Check syntax' }, { i: '🔧', t: 'Auto-Fix', d: 'Fix loose JSON' }, { i: '🌓', t: 'Themes', d: 'Dark & light' }].map((f, i) => (
+            <div key={i} style={{ padding: 10, background: t.bgSecondary, borderRadius: 6, border: `1px solid ${t.border}` }}>
+              <div style={{ fontSize: 16, marginBottom: 4 }}>{f.i}</div>
+              <h3 style={{ margin: 0, fontSize: 10, fontWeight: 600, color: t.text }}>{f.t}</h3>
+              <p style={{ margin: 0, fontSize: 8, color: t.textMuted }}>{f.d}</p>
+            </div>
+          ))}
         </div>
       </main>
 
-      <footer style={{ position: 'relative', padding: '14px 24px', borderTop: `1px solid ${t.border}`, marginTop: 28, textAlign: 'center' }}><p style={{ margin: 0, fontSize: 10, color: t.textDim }}>JSON Toolkit • Built for developers</p></footer>
+      <footer style={{ padding: '12px 20px', borderTop: `1px solid ${t.border}`, marginTop: 20, textAlign: 'center' }}>
+        <p style={{ margin: 0, fontSize: 9, color: t.textDim }}>JSON/YAML Toolkit • Built for developers</p>
+      </footer>
     </div>
   );
 }
