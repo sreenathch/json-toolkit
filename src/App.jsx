@@ -248,7 +248,8 @@ departments:
 features:
   - analytics
   - reporting
-  - exports`
+  - exports`,
+  jwt: `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyLCJleHAiOjE5MTYyMzkwMjIsInJvbGVzIjpbImFkbWluIiwiZWRpdG9yIl0sImVtYWlsIjoiam9obkBleGFtcGxlLmNvbSJ9.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c`
 };
 
 // Format detection
@@ -311,6 +312,92 @@ const countStats = (data, stats = { objects: 0, arrays: 0, strings: 0, numbers: 
   return stats;
 };
 
+// JWT Utilities
+const base64UrlDecode = (str) => {
+  try {
+    let base64 = str.replace(/-/g, '+').replace(/_/g, '/');
+    while (base64.length % 4) base64 += '=';
+    return decodeURIComponent(atob(base64).split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join(''));
+  } catch (e) {
+    return null;
+  }
+};
+
+const base64UrlEncode = (str) => {
+  return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, (_, p1) => String.fromCharCode('0x' + p1)))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+};
+
+const decodeJWT = (token) => {
+  const parts = token.trim().split('.');
+  if (parts.length !== 3) return { valid: false, error: 'Invalid JWT format: must have 3 parts separated by dots' };
+  
+  const headerStr = base64UrlDecode(parts[0]);
+  const payloadStr = base64UrlDecode(parts[1]);
+  
+  if (!headerStr) return { valid: false, error: 'Failed to decode header (invalid Base64URL)' };
+  if (!payloadStr) return { valid: false, error: 'Failed to decode payload (invalid Base64URL)' };
+  
+  try {
+    const header = JSON.parse(headerStr);
+    const payload = JSON.parse(payloadStr);
+    return { valid: true, header, payload, signature: parts[2], parts };
+  } catch (e) {
+    return { valid: false, error: 'Invalid JSON in header or payload: ' + e.message };
+  }
+};
+
+const analyzeJWT = (header, payload) => {
+  const analysis = { claims: [], warnings: [], status: 'valid' };
+  const now = Math.floor(Date.now() / 1000);
+  
+  // Check algorithm
+  if (header.alg) {
+    analysis.claims.push({ key: 'Algorithm', value: header.alg, type: 'header' });
+    if (header.alg === 'none') {
+      analysis.warnings.push('⚠️ Unsigned token (alg: none) - Not secure for production!');
+      analysis.status = 'warning';
+    }
+  }
+  if (header.typ) analysis.claims.push({ key: 'Type', value: header.typ, type: 'header' });
+  
+  // Standard claims
+  if (payload.iss) analysis.claims.push({ key: 'Issuer (iss)', value: payload.iss, type: 'claim' });
+  if (payload.sub) analysis.claims.push({ key: 'Subject (sub)', value: payload.sub, type: 'claim' });
+  if (payload.aud) analysis.claims.push({ key: 'Audience (aud)', value: Array.isArray(payload.aud) ? payload.aud.join(', ') : payload.aud, type: 'claim' });
+  if (payload.jti) analysis.claims.push({ key: 'JWT ID (jti)', value: payload.jti, type: 'claim' });
+  
+  // Time claims
+  if (payload.exp) {
+    const expDate = new Date(payload.exp * 1000);
+    const isExpired = payload.exp < now;
+    analysis.claims.push({ key: 'Expires (exp)', value: expDate.toLocaleString(), timestamp: payload.exp, type: 'time', status: isExpired ? 'expired' : 'valid' });
+    if (isExpired) { analysis.warnings.push('🔴 Token has expired!'); analysis.status = 'expired'; }
+  }
+  if (payload.iat) {
+    const iatDate = new Date(payload.iat * 1000);
+    analysis.claims.push({ key: 'Issued At (iat)', value: iatDate.toLocaleString(), timestamp: payload.iat, type: 'time' });
+  }
+  if (payload.nbf) {
+    const nbfDate = new Date(payload.nbf * 1000);
+    const notYetValid = payload.nbf > now;
+    analysis.claims.push({ key: 'Not Before (nbf)', value: nbfDate.toLocaleString(), timestamp: payload.nbf, type: 'time', status: notYetValid ? 'not_yet_valid' : 'valid' });
+    if (notYetValid) { analysis.warnings.push('🟡 Token not yet valid!'); if (analysis.status === 'valid') analysis.status = 'not_yet_valid'; }
+  }
+  
+  return analysis;
+};
+
+const createJWT = (header, payload) => {
+  try {
+    const headerB64 = base64UrlEncode(JSON.stringify(header));
+    const payloadB64 = base64UrlEncode(JSON.stringify(payload));
+    return { valid: true, token: `${headerB64}.${payloadB64}.` };
+  } catch (e) {
+    return { valid: false, error: e.message };
+  }
+};
+
 export default function JsonToolkit() {
   const [theme, setTheme] = useState('dark');
   const [leftJson, setLeftJson] = useState('');
@@ -327,6 +414,12 @@ export default function JsonToolkit() {
   const [vizExpanded, setVizExpanded] = useState(new Set(['$']));
   const [vizSearch, setVizSearch] = useState('');
   const [vizHover, setVizHover] = useState(null);
+  
+  // JWT State
+  const [jwtInput, setJwtInput] = useState('');
+  const [jwtMode, setJwtMode] = useState('decode');
+  const [jwtHeader, setJwtHeader] = useState('{\n  "alg": "HS256",\n  "typ": "JWT"\n}');
+  const [jwtPayload, setJwtPayload] = useState('{\n  "sub": "1234567890",\n  "name": "John Doe",\n  "iat": 1516239022\n}');
 
   const t = themes[theme];
   
@@ -335,6 +428,16 @@ export default function JsonToolkit() {
   const vizParsed = useMemo(() => smartParse(visualizerJson), [visualizerJson]);
   const convParsed = useMemo(() => smartParse(converterInput), [converterInput]);
   const vizStats = useMemo(() => vizParsed.valid && vizParsed.data ? countStats(vizParsed.data) : null, [vizParsed]);
+  
+  // JWT parsing
+  const jwtDecoded = useMemo(() => jwtInput.trim() ? decodeJWT(jwtInput) : null, [jwtInput]);
+  const jwtAnalysis = useMemo(() => jwtDecoded?.valid ? analyzeJWT(jwtDecoded.header, jwtDecoded.payload) : null, [jwtDecoded]);
+  const jwtHeaderParsed = useMemo(() => { try { return { valid: true, data: JSON.parse(jwtHeader) }; } catch (e) { return { valid: false, error: e.message }; } }, [jwtHeader]);
+  const jwtPayloadParsed = useMemo(() => { try { return { valid: true, data: JSON.parse(jwtPayload) }; } catch (e) { return { valid: false, error: e.message }; } }, [jwtPayload]);
+  const jwtEncoded = useMemo(() => {
+    if (jwtHeaderParsed.valid && jwtPayloadParsed.valid) return createJWT(jwtHeaderParsed.data, jwtPayloadParsed.data);
+    return null;
+  }, [jwtHeaderParsed, jwtPayloadParsed]);
 
   // Auto-convert
   useMemo(() => {
@@ -464,12 +567,14 @@ export default function JsonToolkit() {
   const loadSample = () => {
     if (activeTab === 'converter') setConverterInput(sampleJson.yaml);
     else if (activeTab === 'visualizer' || activeTab === 'validate') setVisualizerJson(sampleJson.visualizer);
+    else if (activeTab === 'jwt') setJwtInput(sampleJson.jwt);
     else { setLeftJson(sampleJson.left); setRightJson(sampleJson.right); }
   };
 
   const clear = () => {
     if (activeTab === 'converter') { setConverterInput(''); setConverterOutput(''); }
     else if (activeTab === 'visualizer' || activeTab === 'validate') setVisualizerJson('');
+    else if (activeTab === 'jwt') { setJwtInput(''); setJwtHeader('{\n  "alg": "HS256",\n  "typ": "JWT"\n}'); setJwtPayload('{\n  "sub": "1234567890",\n  "name": "John Doe",\n  "iat": 1516239022\n}'); }
     else { setLeftJson(''); setRightJson(''); }
   };
 
@@ -664,41 +769,37 @@ export default function JsonToolkit() {
             <div style={{ width: 32, height: 32, borderRadius: 8, background: 'linear-gradient(135deg, #6366f1, #10b981)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>⚡</div>
             <div>
               <h1 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: t.text }}>JSON/YAML Toolkit</h1>
-              <p style={{ margin: 0, fontSize: 9, color: t.textMuted }}>Diff • Convert • Visualize • Validate</p>
+              <p style={{ margin: 0, fontSize: 9, color: t.textMuted }}>Diff • Convert • Visualize • Validate • JWT</p>
             </div>
           </div>
 
           {/* Tabs */}
           <div style={{ display: 'flex', gap: 2, background: t.bgTertiary, padding: 3, borderRadius: 6 }}>
-            {[{ id: 'diff', label: 'Diff' }, { id: 'converter', label: 'Convert' }, { id: 'visualizer', label: 'Visualize' }, { id: 'validate', label: 'Validate' }].map(tab => (
+            {[{ id: 'diff', label: 'Diff' }, { id: 'converter', label: 'Convert' }, { id: 'visualizer', label: 'Visualize' }, { id: 'validate', label: 'Validate' }, { id: 'jwt', label: '🔐 JWT' }].map(tab => (
               <Btn key={tab.id} onClick={() => setActiveTab(tab.id)} active={activeTab === tab.id}>{tab.label}</Btn>
             ))}
           </div>
 
           {/* Actions */}
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-            <button onClick={() => setTheme(t.name === 'dark' ? 'light' : 'dark')} style={{ width: 30, height: 30, borderRadius: 6, background: t.bgTertiary, border: `1px solid ${t.border}`, color: t.textSecondary, cursor: 'pointer' }}>{t.name === 'dark' ? '☀️' : '🌙'}</button>
-            <button onClick={loadSample} style={{ padding: '6px 10px', background: t.accentLight, border: `1px solid ${t.accent}30`, borderRadius: 5, color: t.accent, cursor: 'pointer', fontSize: 10, fontWeight: 500 }}>Sample</button>
-            {activeTab === 'diff' && <button onClick={swap} style={{ padding: '6px 10px', background: t.successLight, border: `1px solid ${t.success}30`, borderRadius: 5, color: t.success, cursor: 'pointer', fontSize: 10, fontWeight: 500 }}>⇄ Swap</button>}
-            <button onClick={clear} style={{ padding: '6px 10px', background: t.errorLight, border: `1px solid ${t.error}30`, borderRadius: 5, color: t.error, cursor: 'pointer', fontSize: 10, fontWeight: 500 }}>Clear</button>
+            <button onClick={loadSample} style={{ padding: '5px 10px', background: t.bgSecondary, border: `1px solid ${t.border}`, borderRadius: 5, color: t.textSecondary, cursor: 'pointer', fontSize: 10 }}>Sample</button>
+            <button onClick={clear} style={{ padding: '5px 10px', background: t.bgSecondary, border: `1px solid ${t.border}`, borderRadius: 5, color: t.textSecondary, cursor: 'pointer', fontSize: 10 }}>Clear</button>
+            {activeTab === 'diff' && <button onClick={swap} style={{ padding: '5px 10px', background: t.bgSecondary, border: `1px solid ${t.border}`, borderRadius: 5, color: t.textSecondary, cursor: 'pointer', fontSize: 10 }}>⇄ Swap</button>}
+            <button onClick={() => setTheme(th => th === 'dark' ? 'light' : 'dark')} style={{ padding: '5px 10px', background: t.bgSecondary, border: `1px solid ${t.border}`, borderRadius: 5, color: t.textSecondary, cursor: 'pointer', fontSize: 10 }}>{t.name === 'dark' ? '☀️' : '🌙'}</button>
           </div>
         </div>
       </header>
 
       <main style={{ maxWidth: 1400, margin: '0 auto', padding: '16px 20px' }}>
-        
         {/* DIFF TAB */}
         {activeTab === 'diff' && (
           <>
-            <div style={{ background: t.accentLight, border: `1px solid ${t.accent}30`, borderRadius: 6, padding: '8px 12px', marginBottom: 12, fontSize: 11, color: t.accent }}>
-              💡 Supports both <strong>JSON</strong> and <strong>YAML</strong> — auto-detected! Compare JSON vs YAML too.
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
-              <InputPanel side="left" label="Original" color="#f87171" value={leftJson} setter={setLeftJson} parsed={leftParsed} />
-              <InputPanel side="right" label="New" color="#4ade80" value={rightJson} setter={setRightJson} parsed={rightParsed} />
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
+              <InputPanel side="left" label="Left (Original)" color={t.error} value={leftJson} setter={setLeftJson} parsed={leftParsed} />
+              <InputPanel side="right" label="Right (Modified)" color={t.success} value={rightJson} setter={setRightJson} parsed={rightParsed} />
             </div>
 
-            {diffTree && (stats.added + stats.removed + stats.modified + stats.type_changed) > 0 && (
+            {diffTree && stats && (stats.added > 0 || stats.removed > 0 || stats.modified > 0) && (
               <div style={{ display: 'flex', gap: 10, padding: '10px 14px', background: t.accentLight, borderRadius: 8, marginBottom: 12, alignItems: 'center', border: `1px solid ${t.accent}20` }}>
                 <span style={{ fontSize: 22, fontWeight: 800, color: t.accent }}>{stats.added + stats.removed + stats.modified + stats.type_changed}</span>
                 <span style={{ color: t.textMuted, fontSize: 11 }}>changes</span>
@@ -897,9 +998,206 @@ export default function JsonToolkit() {
           </div>
         )}
 
+        {/* JWT TAB */}
+        {activeTab === 'jwt' && (
+          <div style={{ maxWidth: 900, margin: '0 auto' }}>
+            {/* Mode Toggle */}
+            <div style={{ background: 'linear-gradient(135deg, rgba(236, 72, 153, 0.1), rgba(168, 85, 247, 0.1))', border: `1px solid ${t.border}`, borderRadius: 6, padding: '10px 14px', marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 11, color: t.text }}>🔐 <span style={{ color: '#ec4899', fontWeight: 600 }}>JWT</span> Token Decoder & Encoder</span>
+              <div style={{ display: 'flex', gap: 4 }}>
+                <button onClick={() => setJwtMode('decode')} style={{ padding: '5px 10px', background: jwtMode === 'decode' ? 'rgba(236, 72, 153, 0.2)' : t.bgTertiary, border: `1px solid ${jwtMode === 'decode' ? 'rgba(236, 72, 153, 0.4)' : t.border}`, borderRadius: 5, color: jwtMode === 'decode' ? '#ec4899' : t.textMuted, cursor: 'pointer', fontSize: 10, fontWeight: 600 }}>Decode</button>
+                <button onClick={() => setJwtMode('encode')} style={{ padding: '5px 10px', background: jwtMode === 'encode' ? 'rgba(168, 85, 247, 0.2)' : t.bgTertiary, border: `1px solid ${jwtMode === 'encode' ? 'rgba(168, 85, 247, 0.4)' : t.border}`, borderRadius: 5, color: jwtMode === 'encode' ? '#a855f7' : t.textMuted, cursor: 'pointer', fontSize: 10, fontWeight: 600 }}>Encode</button>
+              </div>
+            </div>
+
+            {/* DECODE MODE */}
+            {jwtMode === 'decode' && (
+              <>
+                {/* JWT Input */}
+                <div style={{ background: t.bgSecondary, borderRadius: 10, border: `1px solid ${!jwtDecoded?.valid && jwtInput ? t.error + '60' : t.border}`, overflow: 'hidden', marginBottom: 14 }}>
+                  <div style={{ padding: '8px 12px', background: t.bgTertiary, borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#ec4899', boxShadow: '0 0 6px #ec4899' }} />
+                      <span style={{ fontSize: 11, fontWeight: 600, color: t.text }}>JWT Token</span>
+                      {jwtDecoded?.valid && <span style={{ fontSize: 9, color: t.success, background: t.successLight, padding: '1px 5px', borderRadius: 3 }}>✓ Valid</span>}
+                    </div>
+                    <div style={{ display: 'flex', gap: 3 }}>
+                      <button onClick={() => copy(jwtInput, 'jwt-input')} style={{ padding: '3px 6px', background: t.bgHover, border: 'none', borderRadius: 3, color: copied === 'jwt-input' ? t.success : t.textSecondary, cursor: 'pointer', fontSize: 9 }}>{copied === 'jwt-input' ? '✓' : 'Copy'}</button>
+                    </div>
+                  </div>
+                  <textarea value={jwtInput} onChange={e => setJwtInput(e.target.value)} placeholder="Paste your JWT token here (e.g., eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...)" style={{ width: '100%', height: 80, padding: 10, background: 'transparent', border: 'none', color: t.text, fontSize: 11, fontFamily: 'monospace', lineHeight: 1.5, resize: 'none', outline: 'none', wordBreak: 'break-all' }} spellCheck={false} />
+                  {!jwtDecoded?.valid && jwtInput && <div style={{ padding: '8px 12px', background: t.errorLight, borderTop: `1px solid ${t.error}30`, color: t.error, fontSize: 10 }}>⚠ {jwtDecoded?.error}</div>}
+                </div>
+
+                {/* Empty State */}
+                {!jwtInput.trim() && (
+                  <div style={{ background: t.bgSecondary, borderRadius: 8, border: `1px solid ${t.border}`, padding: 40, textAlign: 'center' }}>
+                    <p style={{ fontSize: 12, fontWeight: 500, color: t.text, marginBottom: 4 }}>Decode JWT Token</p>
+                    <p style={{ fontSize: 10, color: t.textMuted, marginBottom: 12 }}>Paste a JWT to decode and analyze its contents</p>
+                    <button onClick={loadSample} style={{ padding: '8px 14px', background: 'linear-gradient(135deg, #ec4899, #a855f7)', border: 'none', borderRadius: 5, color: 'white', cursor: 'pointer', fontSize: 10, fontWeight: 600 }}>Load Sample</button>
+                  </div>
+                )}
+
+                {/* Decoded Output */}
+                {jwtDecoded?.valid && (
+                  <>
+                    {/* Token Structure Display */}
+                    <div style={{ background: t.bgSecondary, borderRadius: 8, border: `1px solid ${t.border}`, overflow: 'hidden', marginBottom: 14 }}>
+                      <div style={{ padding: '8px 12px', background: t.bgTertiary, borderBottom: `1px solid ${t.border}` }}>
+                        <span style={{ fontSize: 10, fontWeight: 600, color: t.text }}>Token Structure</span>
+                      </div>
+                      <div style={{ padding: 12, fontFamily: 'monospace', fontSize: 10, lineHeight: 1.6, wordBreak: 'break-all' }}>
+                        <span style={{ color: '#f472b6', background: 'rgba(244, 114, 182, 0.1)', padding: '2px 4px', borderRadius: 3 }}>{jwtDecoded.parts[0]}</span>
+                        <span style={{ color: t.textMuted }}>.</span>
+                        <span style={{ color: '#c084fc', background: 'rgba(192, 132, 252, 0.1)', padding: '2px 4px', borderRadius: 3 }}>{jwtDecoded.parts[1]}</span>
+                        <span style={{ color: t.textMuted }}>.</span>
+                        <span style={{ color: '#4ade80', background: 'rgba(74, 222, 128, 0.1)', padding: '2px 4px', borderRadius: 3 }}>{jwtDecoded.parts[2] || '(empty)'}</span>
+                      </div>
+                      <div style={{ padding: '8px 12px', background: t.bgTertiary, borderTop: `1px solid ${t.border}`, display: 'flex', gap: 12, fontSize: 9 }}>
+                        <span><span style={{ color: '#f472b6' }}>●</span> Header</span>
+                        <span><span style={{ color: '#c084fc' }}>●</span> Payload</span>
+                        <span><span style={{ color: '#4ade80' }}>●</span> Signature</span>
+                      </div>
+                    </div>
+
+                    {/* Status Banner */}
+                    {jwtAnalysis && (
+                      <div style={{ 
+                        padding: '10px 14px', 
+                        background: jwtAnalysis.status === 'expired' ? t.errorLight : jwtAnalysis.status === 'warning' || jwtAnalysis.status === 'not_yet_valid' ? t.warningLight : t.successLight, 
+                        borderRadius: 8, 
+                        marginBottom: 14, 
+                        border: `1px solid ${jwtAnalysis.status === 'expired' ? t.error : jwtAnalysis.status === 'warning' || jwtAnalysis.status === 'not_yet_valid' ? t.warning : t.success}30` 
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontSize: 18 }}>{jwtAnalysis.status === 'expired' ? '🔴' : jwtAnalysis.status === 'warning' || jwtAnalysis.status === 'not_yet_valid' ? '🟡' : '🟢'}</span>
+                          <span style={{ fontSize: 12, fontWeight: 600, color: jwtAnalysis.status === 'expired' ? t.error : jwtAnalysis.status === 'warning' || jwtAnalysis.status === 'not_yet_valid' ? t.warning : t.success }}>
+                            {jwtAnalysis.status === 'expired' ? 'Token Expired' : jwtAnalysis.status === 'not_yet_valid' ? 'Token Not Yet Valid' : jwtAnalysis.status === 'warning' ? 'Token Has Warnings' : 'Token Valid'}
+                          </span>
+                        </div>
+                        {jwtAnalysis.warnings.length > 0 && (
+                          <div style={{ marginTop: 8, fontSize: 10, color: t.textSecondary }}>
+                            {jwtAnalysis.warnings.map((w, i) => <div key={i}>{w}</div>)}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Header & Payload */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
+                      {/* Header */}
+                      <div style={{ background: t.bgSecondary, borderRadius: 8, border: `1px solid ${t.border}`, overflow: 'hidden' }}>
+                        <div style={{ padding: '8px 12px', background: 'rgba(244, 114, 182, 0.1)', borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#f472b6' }} />
+                            <span style={{ fontSize: 11, fontWeight: 600, color: t.text }}>Header</span>
+                            <span style={{ fontSize: 9, padding: '1px 5px', background: t.bgTertiary, borderRadius: 3, color: t.textMuted }}>ALGORITHM & TOKEN TYPE</span>
+                          </div>
+                          <button onClick={() => copy(JSON.stringify(jwtDecoded.header, null, 2), 'jwt-header')} style={{ padding: '3px 6px', background: t.bgHover, border: 'none', borderRadius: 3, color: copied === 'jwt-header' ? t.success : t.textSecondary, cursor: 'pointer', fontSize: 9 }}>{copied === 'jwt-header' ? '✓' : 'Copy'}</button>
+                        </div>
+                        <pre style={{ margin: 0, padding: 12, fontSize: 10, color: t.text, fontFamily: 'monospace', overflow: 'auto', maxHeight: 150 }}>{JSON.stringify(jwtDecoded.header, null, 2)}</pre>
+                      </div>
+
+                      {/* Payload */}
+                      <div style={{ background: t.bgSecondary, borderRadius: 8, border: `1px solid ${t.border}`, overflow: 'hidden' }}>
+                        <div style={{ padding: '8px 12px', background: 'rgba(192, 132, 252, 0.1)', borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#c084fc' }} />
+                            <span style={{ fontSize: 11, fontWeight: 600, color: t.text }}>Payload</span>
+                            <span style={{ fontSize: 9, padding: '1px 5px', background: t.bgTertiary, borderRadius: 3, color: t.textMuted }}>DATA</span>
+                          </div>
+                          <button onClick={() => copy(JSON.stringify(jwtDecoded.payload, null, 2), 'jwt-payload')} style={{ padding: '3px 6px', background: t.bgHover, border: 'none', borderRadius: 3, color: copied === 'jwt-payload' ? t.success : t.textSecondary, cursor: 'pointer', fontSize: 9 }}>{copied === 'jwt-payload' ? '✓' : 'Copy'}</button>
+                        </div>
+                        <pre style={{ margin: 0, padding: 12, fontSize: 10, color: t.text, fontFamily: 'monospace', overflow: 'auto', maxHeight: 150 }}>{JSON.stringify(jwtDecoded.payload, null, 2)}</pre>
+                      </div>
+                    </div>
+
+                    {/* Claims Analysis */}
+                    {jwtAnalysis && jwtAnalysis.claims.length > 0 && (
+                      <div style={{ background: t.bgSecondary, borderRadius: 8, border: `1px solid ${t.border}`, overflow: 'hidden' }}>
+                        <div style={{ padding: '8px 12px', background: t.bgTertiary, borderBottom: `1px solid ${t.border}` }}>
+                          <span style={{ fontSize: 10, fontWeight: 600, color: t.text }}>Claims Analysis</span>
+                        </div>
+                        <div style={{ padding: 12 }}>
+                          <div style={{ display: 'grid', gap: 8 }}>
+                            {jwtAnalysis.claims.map((claim, i) => (
+                              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: t.bgTertiary, borderRadius: 6 }}>
+                                <span style={{ fontSize: 10, color: t.textMuted, minWidth: 120 }}>{claim.key}</span>
+                                <span style={{ fontSize: 10, color: t.text, fontFamily: 'monospace', flex: 1, wordBreak: 'break-all' }}>{claim.value}</span>
+                                {claim.status === 'expired' && <span style={{ fontSize: 9, padding: '1px 5px', background: t.errorLight, color: t.error, borderRadius: 3 }}>Expired</span>}
+                                {claim.status === 'not_yet_valid' && <span style={{ fontSize: 9, padding: '1px 5px', background: t.warningLight, color: t.warning, borderRadius: 3 }}>Not Yet</span>}
+                                {claim.status === 'valid' && claim.type === 'time' && <span style={{ fontSize: 9, padding: '1px 5px', background: t.successLight, color: t.success, borderRadius: 3 }}>Valid</span>}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </>
+            )}
+
+            {/* ENCODE MODE */}
+            {jwtMode === 'encode' && (
+              <>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
+                  {/* Header Input */}
+                  <div style={{ background: t.bgSecondary, borderRadius: 10, border: `1px solid ${!jwtHeaderParsed.valid ? t.error + '60' : t.border}`, overflow: 'hidden' }}>
+                    <div style={{ padding: '8px 12px', background: 'rgba(244, 114, 182, 0.1)', borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#f472b6' }} />
+                        <span style={{ fontSize: 11, fontWeight: 600, color: t.text }}>Header</span>
+                        {jwtHeaderParsed.valid && <span style={{ fontSize: 9, color: t.success, background: t.successLight, padding: '1px 5px', borderRadius: 3 }}>✓</span>}
+                      </div>
+                    </div>
+                    <textarea value={jwtHeader} onChange={e => setJwtHeader(e.target.value)} placeholder='{"alg": "HS256", "typ": "JWT"}' style={{ width: '100%', height: 100, padding: 10, background: 'transparent', border: 'none', color: t.text, fontSize: 11, fontFamily: 'monospace', lineHeight: 1.5, resize: 'none', outline: 'none' }} spellCheck={false} />
+                    {!jwtHeaderParsed.valid && <div style={{ padding: '8px 12px', background: t.errorLight, borderTop: `1px solid ${t.error}30`, color: t.error, fontSize: 10 }}>⚠ {jwtHeaderParsed.error}</div>}
+                  </div>
+
+                  {/* Payload Input */}
+                  <div style={{ background: t.bgSecondary, borderRadius: 10, border: `1px solid ${!jwtPayloadParsed.valid ? t.error + '60' : t.border}`, overflow: 'hidden' }}>
+                    <div style={{ padding: '8px 12px', background: 'rgba(192, 132, 252, 0.1)', borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#c084fc' }} />
+                        <span style={{ fontSize: 11, fontWeight: 600, color: t.text }}>Payload</span>
+                        {jwtPayloadParsed.valid && <span style={{ fontSize: 9, color: t.success, background: t.successLight, padding: '1px 5px', borderRadius: 3 }}>✓</span>}
+                      </div>
+                    </div>
+                    <textarea value={jwtPayload} onChange={e => setJwtPayload(e.target.value)} placeholder='{"sub": "1234567890", "name": "John Doe"}' style={{ width: '100%', height: 100, padding: 10, background: 'transparent', border: 'none', color: t.text, fontSize: 11, fontFamily: 'monospace', lineHeight: 1.5, resize: 'none', outline: 'none' }} spellCheck={false} />
+                    {!jwtPayloadParsed.valid && <div style={{ padding: '8px 12px', background: t.errorLight, borderTop: `1px solid ${t.error}30`, color: t.error, fontSize: 10 }}>⚠ {jwtPayloadParsed.error}</div>}
+                  </div>
+                </div>
+
+                {/* Warning */}
+                <div style={{ padding: '10px 14px', background: t.warningLight, borderRadius: 8, marginBottom: 14, border: `1px solid ${t.warning}30` }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 14 }}>⚠️</span>
+                    <span style={{ fontSize: 10, color: t.warning }}>This creates an <strong>unsigned</strong> token for testing only. For production, sign tokens server-side with a secret key.</span>
+                  </div>
+                </div>
+
+                {/* Generated Token */}
+                {jwtEncoded?.valid && (
+                  <div style={{ background: t.bgSecondary, borderRadius: 8, border: `1px solid ${t.border}`, overflow: 'hidden' }}>
+                    <div style={{ padding: '8px 12px', background: t.bgTertiary, borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#a855f7' }} />
+                        <span style={{ fontSize: 11, fontWeight: 600, color: t.text }}>Generated Token (Unsigned)</span>
+                      </div>
+                      <button onClick={() => copy(jwtEncoded.token, 'jwt-encoded')} style={{ padding: '3px 6px', background: t.bgHover, border: 'none', borderRadius: 3, color: copied === 'jwt-encoded' ? t.success : t.textSecondary, cursor: 'pointer', fontSize: 9 }}>{copied === 'jwt-encoded' ? '✓' : 'Copy'}</button>
+                    </div>
+                    <div style={{ padding: 12, fontFamily: 'monospace', fontSize: 10, lineHeight: 1.6, wordBreak: 'break-all', color: t.text }}>{jwtEncoded.token}</div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
         {/* Features */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 8, marginTop: 20 }}>
-          {[{ i: '🔄', t: 'JSON↔YAML', d: 'Convert formats' }, { i: '🌳', t: 'Tree Diff', d: 'Visual compare' }, { i: '🔍', t: 'Visualize', d: 'Explore data' }, { i: '✅', t: 'Validate', d: 'Check syntax' }, { i: '🔧', t: 'Auto-Fix', d: 'Fix loose JSON' }, { i: '🌓', t: 'Themes', d: 'Dark & light' }].map((f, i) => (
+          {[{ i: '🔄', t: 'JSON↔YAML', d: 'Convert formats' }, { i: '🌳', t: 'Tree Diff', d: 'Visual compare' }, { i: '🔍', t: 'Visualize', d: 'Explore data' }, { i: '✅', t: 'Validate', d: 'Check syntax' }, { i: '🔐', t: 'JWT', d: 'Decode tokens' }, { i: '🌓', t: 'Themes', d: 'Dark & light' }].map((f, i) => (
             <div key={i} style={{ padding: 10, background: t.bgSecondary, borderRadius: 6, border: `1px solid ${t.border}` }}>
               <div style={{ fontSize: 16, marginBottom: 4 }}>{f.i}</div>
               <h3 style={{ margin: 0, fontSize: 10, fontWeight: 600, color: t.text }}>{f.t}</h3>

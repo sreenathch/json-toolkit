@@ -5,10 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     
     <!-- Primary Meta Tags -->
-    <title>JSON/YAML Formatter, Converter, Diff Checker & Validator - Free Online Tool</title>
-    <meta name="title" content="JSON/YAML Formatter, Converter, Diff Checker & Validator - Free Online Tool" />
-    <meta name="description" content="Free online JSON and YAML toolkit. Format, validate, convert JSON to YAML, compare differences, and visualize data structures. Best developer tool for JSON/YAML debugging." />
-    <meta name="keywords" content="json formatter, yaml formatter, json to yaml, yaml to json, json converter, yaml converter, json diff, yaml diff, json compare, yaml compare, json validator, yaml validator, json beautifier, yaml beautifier, json minify, json parser, yaml parser, json editor, yaml editor, json tree viewer, yaml viewer, json online, yaml online, json tool, yaml tool, format json, format yaml, validate json, validate yaml, json yaml converter online free" />
+    <title>JSON/YAML Formatter, Converter, Diff & JWT Decoder - Free Online Tool</title>
+    <meta name="title" content="JSON/YAML Formatter, Converter, Diff & JWT Decoder - Free Online Tool" />
+    <meta name="description" content="Free online JSON/YAML toolkit with JWT decoder & encoder. Format, validate, convert JSON to YAML, compare differences, decode JWT tokens, and visualize data. Best developer tool." />
+    <meta name="keywords" content="json formatter, yaml formatter, json to yaml, yaml to json, json converter, yaml converter, json diff, yaml diff, json compare, yaml compare, json validator, yaml validator, json beautifier, yaml beautifier, json minify, json parser, yaml parser, json editor, yaml editor, json tree viewer, yaml viewer, json online, yaml online, json tool, yaml tool, format json, format yaml, validate json, validate yaml, json yaml converter online free, jwt decoder, jwt encoder, jwt token decoder, decode jwt, jwt debugger, jwt parser, jwt validator, json web token decoder, jwt online, jwt tool, base64 jwt decode" />
     <meta name="author" content="JSON/YAML Toolkit" />
     <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
     <meta name="googlebot" content="index, follow" />
@@ -17,8 +17,8 @@
     <!-- Open Graph / Facebook -->
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://sreenathch.github.io/json-toolkit/" />
-    <meta property="og:title" content="JSON/YAML Formatter, Converter & Diff Checker - Free Online Tool" />
-    <meta property="og:description" content="Free online JSON and YAML toolkit. Format, validate, convert, compare differences, and visualize data structures instantly." />
+    <meta property="og:title" content="JSON/YAML Formatter, Converter, Diff & JWT Decoder - Free Online Tool" />
+    <meta property="og:description" content="Free online JSON/YAML toolkit with JWT decoder. Format, validate, convert, compare, decode JWT tokens, and visualize data structures instantly." />
     <meta property="og:image" content="https://sreenathch.github.io/json-toolkit/og-image.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
@@ -28,8 +28,8 @@
     <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:url" content="https://sreenathch.github.io/json-toolkit/" />
-    <meta name="twitter:title" content="JSON/YAML Formatter, Converter & Diff Checker - Free Online Tool" />
-    <meta name="twitter:description" content="Free online JSON and YAML toolkit. Format, validate, convert, compare differences, and visualize data structures instantly." />
+    <meta name="twitter:title" content="JSON/YAML Formatter, Converter, Diff & JWT Decoder - Free Online Tool" />
+    <meta name="twitter:description" content="Free online JSON/YAML toolkit with JWT decoder. Format, validate, convert, compare, decode JWT tokens, and visualize data structures instantly." />
     <meta name="twitter:image" content="https://sreenathch.github.io/json-toolkit/og-image.png" />
 
     <!-- Additional SEO Meta Tags -->
@@ -55,8 +55,8 @@
       "@context": "https://schema.org",
       "@type": "WebApplication",
       "name": "JSON/YAML Toolkit",
-      "alternateName": ["JSON Formatter", "YAML Formatter", "JSON to YAML Converter", "YAML to JSON Converter", "JSON Diff Checker", "YAML Diff Checker", "JSON Validator", "YAML Validator"],
-      "description": "Free online JSON and YAML toolkit. Format, validate, convert between JSON and YAML, compare differences, and visualize data structures.",
+      "alternateName": ["JSON Formatter", "YAML Formatter", "JSON to YAML Converter", "YAML to JSON Converter", "JSON Diff Checker", "YAML Diff Checker", "JSON Validator", "YAML Validator", "JWT Decoder", "JWT Encoder", "JWT Token Decoder", "JSON Web Token Decoder"],
+      "description": "Free online JSON and YAML toolkit with JWT decoder/encoder. Format, validate, convert between JSON and YAML, compare differences, decode JWT tokens, and visualize data structures.",
       "url": "https://sreenathch.github.io/json-toolkit/",
       "applicationCategory": "DeveloperApplication",
       "operatingSystem": "Any",
@@ -75,13 +75,17 @@
         "JSON Diff & Comparison",
         "YAML Diff & Comparison",
         "Interactive Tree Visualization",
+        "JWT Token Decoder",
+        "JWT Token Encoder",
+        "JWT Claims Analysis",
+        "JWT Expiration Checking",
         "Dark & Light Theme Support",
         "Auto-fix for Unquoted Keys",
         "Minify JSON/YAML",
         "Sort Keys Alphabetically"
       ],
       "screenshot": "https://sreenathch.github.io/json-toolkit/og-image.png",
-      "softwareVersion": "1.1.0"
+      "softwareVersion": "1.2.0"
     }
     </script>
 
@@ -109,6 +113,30 @@
         },
         {
           "@type": "Question",
+          "name": "How do I decode a JWT token?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Use the JWT tab and select Decode mode. Paste your JWT token in the input field and the tool will instantly decode it, showing you the header, payload, and signature. It also analyzes claims like expiration time, issuer, and subject."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Can I create JWT tokens with this tool?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes! Use the JWT tab and switch to Encode mode. Enter your header and payload JSON, and the tool will generate an unsigned JWT token for testing purposes. Note: For production, always sign tokens server-side with a secret key."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "How do I check if a JWT token is expired?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Paste your JWT in the JWT tab's Decode mode. The tool automatically checks the exp (expiration) claim and shows a status indicator: green for valid tokens, red for expired tokens, and yellow for tokens that aren't valid yet."
+          }
+        },
+        {
+          "@type": "Question",
           "name": "Can I validate YAML syntax?",
           "acceptedAnswer": {
             "@type": "Answer",
@@ -117,7 +145,7 @@
         },
         {
           "@type": "Question",
-          "name": "Is this JSON/YAML tool free?",
+          "name": "Is this JSON/YAML/JWT tool free?",
           "acceptedAnswer": {
             "@type": "Answer",
             "text": "Yes, JSON/YAML Toolkit is completely free to use. There are no ads, no registration required, and no usage limits. Your data stays in your browser and is never sent to any server."
@@ -131,7 +159,7 @@
     <!-- SEO-friendly noscript fallback -->
     <noscript>
       <div style="padding: 20px; text-align: center; font-family: sans-serif;">
-        <h1>JSON/YAML Toolkit - Free Online Formatter, Converter & Diff Checker</h1>
+        <h1>JSON/YAML Toolkit - Free Online Formatter, Converter, Diff & JWT Decoder</h1>
         <p>Please enable JavaScript to use this application.</p>
         <h2>Features:</h2>
         <ul style="text-align: left; max-width: 600px; margin: 0 auto;">
@@ -139,6 +167,8 @@
           <li><strong>JSON ↔ YAML Converter</strong> - Convert between JSON and YAML instantly</li>
           <li><strong>JSON/YAML Validator</strong> - Validate syntax with detailed error messages</li>
           <li><strong>JSON/YAML Diff Checker</strong> - Compare two files and see differences</li>
+          <li><strong>JWT Decoder</strong> - Decode JSON Web Tokens and analyze claims</li>
+          <li><strong>JWT Encoder</strong> - Create unsigned JWT tokens for testing</li>
           <li><strong>Tree Viewer</strong> - Visualize data structure as an interactive tree</li>
           <li><strong>Minifier</strong> - Compress by removing whitespace</li>
         </ul>

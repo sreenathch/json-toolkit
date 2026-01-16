@@ -3,9 +3,9 @@
 ## ✅ What's Already Included
 
 ### Meta Tags (in index.html)
-- Title optimized for search: "JSON/YAML Formatter, Converter, Diff Checker & Validator"
-- Description (160 chars) with key features
-- Keywords covering both JSON and YAML terms
+- Title optimized for search: "JSON/YAML Formatter, Converter, Diff & JWT Decoder"
+- Description (160 chars) with key features including JWT
+- Keywords covering JSON, YAML, and JWT terms
 - Canonical URL
 - Robots directives
 
@@ -31,14 +31,17 @@
 | Keyword | Monthly Searches |
 |---------|------------------|
 | json formatter | 74,000 |
+| jwt decoder | 40,500 |
 | yaml formatter | 12,000 |
 | json viewer | 22,000 |
+| jwt decode | 33,100 |
 | json validator | 18,000 |
 | yaml validator | 6,600 |
 | json to yaml | 14,800 |
 | yaml to json | 8,100 |
 | json compare | 12,000 |
 | json diff | 8,000 |
+| jwt debugger | 9,900 |
 
 ### Long-Tail Keywords (Lower Competition)
 - json formatter online free
@@ -51,6 +54,14 @@
 - yaml validator online free
 - convert json to yaml online
 - json yaml converter
+- jwt token decoder online
+- decode jwt token free
+- jwt decoder online free
+- jwt encoder online
+- json web token decoder
+- jwt claims viewer
+- jwt expiration checker
+- base64 jwt decode
 
 ---
 
@@ -107,9 +118,9 @@
 - [SaaSHub](https://saashub.com)
 
 ### GitHub
-- Add topics: `json`, `yaml`, `formatter`, `validator`, `diff`, `converter`, `developer-tools`
+- Add topics: `json`, `yaml`, `jwt`, `jwt-decoder`, `formatter`, `validator`, `diff`, `converter`, `developer-tools`
 - Create good README with badges
-- Add to awesome-json and awesome-yaml lists
+- Add to awesome-json, awesome-yaml, and awesome-jwt lists
 
 ---
 
@@ -121,11 +132,17 @@
 3. "How to Compare Two JSON Files for Differences"
 4. "Understanding JSON Syntax Errors"
 5. "YAML for Beginners: A Complete Guide"
+6. "How to Decode JWT Tokens (Step-by-Step Guide)"
+7. "Understanding JWT Claims: iat, exp, nbf Explained"
+8. "JWT Token Structure: Header, Payload, Signature"
+9. "How to Check if a JWT Token is Expired"
 
 ### Comparison Posts
 1. "JSON Toolkit vs JSONLint vs JSON Editor Online"
 2. "Best Free YAML Validators in 2025"
 3. "Top 10 JSON Tools for Developers"
+4. "JWT.io vs JSON Toolkit: Which JWT Decoder is Better?"
+5. "Best Free JWT Decoders in 2025"
 
 ---
 
@@ -153,10 +170,10 @@
 
 ---
 
-## 🆕 Updated LinkedIn Post (with YAML)
+## 🆕 Updated LinkedIn Post (with JWT)
 
 ```
-🚀 I built a free JSON/YAML Toolkit for developers!
+🚀 I built a free JSON/YAML/JWT Toolkit for developers!
 
 Tired of switching between multiple tools?
 
@@ -165,18 +182,20 @@ JSON/YAML Toolkit does it all:
 ✅ Formatter & Beautifier  
 ✅ Validator with error line numbers
 ✅ Diff Checker - compare visually
+✅ 🔐 JWT Decoder - decode tokens instantly
+✅ JWT Encoder - create test tokens
+✅ JWT Claims Analysis & Expiration Check
 ✅ Interactive Tree Viewer
-✅ Auto-fix for unquoted keys
 ✅ Dark & Light themes
 
-Works with both JSON AND YAML. You can even compare JSON vs YAML!
+Works with JSON, YAML, and JWT. You can even compare JSON vs YAML!
 
 🔗 Try it: https://sreenathch.github.io/json-toolkit/
 ⭐ GitHub: https://github.com/sreenathch/json-toolkit
 
-What's your go-to data format - JSON or YAML? 👇
+What's your most-used developer tool? 👇
 
-#WebDevelopment #JavaScript #DevOps #YAML #JSON #OpenSource #DeveloperTools
+#WebDevelopment #JavaScript #DevOps #YAML #JSON #JWT #OpenSource #DeveloperTools #API
 ```
 
 ---
