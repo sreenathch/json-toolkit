@@ -1138,14 +1138,14 @@ export default function JsonToolkit() {
           {depth > 0 && <span style={{ color: t.textMuted, margin: '0 4px' }}>:</span>}
           <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{renderVal()}</span>
           {hasKids && !exp && <span style={{ color: t.textDim, fontSize: 10, marginLeft: 4 }}>{type === 'array' ? `${data.length}]` : `${Object.keys(data).length}}`}</span>}
-          {/* Action buttons - closer to content */}
+          {/* Action buttons - aligned and 30% larger */}
           {hover && (
-            <div style={{ marginLeft: 8, display: 'flex', gap: 2, alignItems: 'center' }}>
+            <div style={{ marginLeft: 8, display: 'flex', gap: 3, alignItems: 'center', flexShrink: 0 }}>
               {(type === 'object' || type === 'array') && (
-                <div style={{ position: 'relative' }}>
+                <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
                   <button 
                     onClick={e => { e.stopPropagation(); setAddMenuPath(addMenuPath === path ? null : path); }} 
-                    style={{ padding: '1px 4px', background: t.successLight, border: 'none', borderRadius: 3, color: t.success, cursor: 'pointer', fontSize: 9 }} 
+                    style={{ padding: '2px 6px', background: t.successLight, border: 'none', borderRadius: 4, color: t.success, cursor: 'pointer', fontSize: 12, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', minWidth: 20, height: 20 }} 
                     title={type === 'array' ? 'Add item' : 'Add key'}
                   >+</button>
                   {/* Add Menu Dropdown */}
@@ -1203,13 +1203,13 @@ export default function JsonToolkit() {
                 </div>
               )}
               {type !== 'object' && type !== 'array' && (
-                <button onClick={startEditValue} style={{ padding: '1px 4px', background: t.warningLight, border: 'none', borderRadius: 3, color: t.warning, cursor: 'pointer', fontSize: 9 }} title="Edit value">✎</button>
+                <button onClick={startEditValue} style={{ padding: '2px 6px', background: t.warningLight, border: 'none', borderRadius: 4, color: t.warning, cursor: 'pointer', fontSize: 12, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', minWidth: 20, height: 20 }} title="Edit value">✎</button>
               )}
               {depth > 0 && (
-                <button onClick={e => { e.stopPropagation(); if (confirm('Delete this item?')) deleteAtPath(path); }} style={{ padding: '1px 4px', background: t.errorLight, border: 'none', borderRadius: 3, color: t.error, cursor: 'pointer', fontSize: 9 }} title="Delete">×</button>
+                <button onClick={e => { e.stopPropagation(); if (confirm('Delete this item?')) deleteAtPath(path); }} style={{ padding: '2px 6px', background: t.errorLight, border: 'none', borderRadius: 4, color: t.error, cursor: 'pointer', fontSize: 12, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', minWidth: 20, height: 20 }} title="Delete">×</button>
               )}
-              <button onClick={e => { e.stopPropagation(); copy(JSON.stringify(data, null, 2), path); }} style={{ padding: '1px 4px', background: t.bgTertiary, border: 'none', borderRadius: 3, color: copied === path ? t.success : t.textMuted, cursor: 'pointer', fontSize: 9 }}>{copied === path ? '✓' : 'Copy'}</button>
-              <button onClick={e => { e.stopPropagation(); copy(path, `p-${path}`); }} style={{ padding: '1px 4px', background: t.bgTertiary, border: 'none', borderRadius: 3, color: copied === `p-${path}` ? t.success : t.textMuted, cursor: 'pointer', fontSize: 9 }}>{copied === `p-${path}` ? '✓' : 'Path'}</button>
+              <button onClick={e => { e.stopPropagation(); copy(JSON.stringify(data, null, 2), path); }} style={{ padding: '2px 6px', background: t.bgTertiary, border: 'none', borderRadius: 4, color: copied === path ? t.success : t.textMuted, cursor: 'pointer', fontSize: 12, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', height: 20 }}>{copied === path ? '✓' : 'Copy'}</button>
+              <button onClick={e => { e.stopPropagation(); copy(path, `p-${path}`); }} style={{ padding: '2px 6px', background: t.bgTertiary, border: 'none', borderRadius: 4, color: copied === `p-${path}` ? t.success : t.textMuted, cursor: 'pointer', fontSize: 12, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', height: 20 }}>{copied === `p-${path}` ? '✓' : 'Path'}</button>
             </div>
           )}
         </div>
