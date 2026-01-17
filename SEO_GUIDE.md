@@ -32,6 +32,7 @@
 |---------|------------------|
 | json formatter | 74,000 |
 | jwt decoder | 40,500 |
+| json editor | 27,100 |
 | yaml formatter | 12,000 |
 | json viewer | 22,000 |
 | jwt decode | 33,100 |
@@ -62,6 +63,11 @@
 - jwt claims viewer
 - jwt expiration checker
 - base64 jwt decode
+- interactive json editor online
+- edit json online free
+- json tree editor
+- json editor with tree view
+- edit json values online
 
 ---
 
@@ -136,6 +142,8 @@
 7. "Understanding JWT Claims: iat, exp, nbf Explained"
 8. "JWT Token Structure: Header, Payload, Signature"
 9. "How to Check if a JWT Token is Expired"
+10. "Edit JSON Values in a Tree View - Interactive Guide"
+11. "How to Add and Delete Keys in JSON Online"
 
 ### Comparison Posts
 1. "JSON Toolkit vs JSONLint vs JSON Editor Online"
@@ -143,6 +151,7 @@
 3. "Top 10 JSON Tools for Developers"
 4. "JWT.io vs JSON Toolkit: Which JWT Decoder is Better?"
 5. "Best Free JWT Decoders in 2025"
+6. "Best Interactive JSON Editors Online (2025)"
 
 ---
 
@@ -170,7 +179,7 @@
 
 ---
 
-## 🆕 Updated LinkedIn Post (with JWT)
+## 🆕 Updated LinkedIn Post (with Interactive Editor)
 
 ```
 🚀 I built a free JSON/YAML/JWT Toolkit for developers!
@@ -182,20 +191,26 @@ JSON/YAML Toolkit does it all:
 ✅ Formatter & Beautifier  
 ✅ Validator with error line numbers
 ✅ Diff Checker - compare visually
-✅ 🔐 JWT Decoder - decode tokens instantly
-✅ JWT Encoder - create test tokens
-✅ JWT Claims Analysis & Expiration Check
-✅ Interactive Tree Viewer
-✅ Dark & Light themes
+✅ 🔐 JWT Decoder & Encoder
 
-Works with JSON, YAML, and JWT. You can even compare JSON vs YAML!
+🆕 **Interactive Tree Editor:**
+✅ ✏️ Double-click to edit values inline
+✅ ✏️ Rename keys directly in tree
+✅ ➕ Add new keys or array items
+✅ ❌ Delete nodes with one click
+✅ 🔄 Changes sync in real-time!
 
-🔗 Try it: https://sreenathch.github.io/json-toolkit/
-⭐ GitHub: https://github.com/sreenathch/json-toolkit
+The best part?
+✅ Works with JSON, YAML, AND JWT
+✅ 100% free, no ads, no sign-up
+✅ Your data never leaves your browser
 
-What's your most-used developer tool? 👇
+Try it → https://lnkd.in/gmAmpZ76
+Star it → https://lnkd.in/gzcMr7Gz
 
-#WebDevelopment #JavaScript #DevOps #YAML #JSON #JWT #OpenSource #DeveloperTools #API
+What developer tool do you wish existed? 👇
+
+#WebDevelopment #JavaScript #DevOps #YAML #JSON #JWT #API #OpenSource #BuildInPublic #DeveloperTools
 ```
 
 ---

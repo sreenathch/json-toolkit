@@ -414,6 +414,10 @@ export default function JsonToolkit() {
   const [vizExpanded, setVizExpanded] = useState(new Set(['$']));
   const [vizSearch, setVizSearch] = useState('');
   const [vizHover, setVizHover] = useState(null);
+  const [editingPath, setEditingPath] = useState(null);
+  const [editingValue, setEditingValue] = useState('');
+  const [editingKeyPath, setEditingKeyPath] = useState(null);
+  const [editingKeyValue, setEditingKeyValue] = useState('');
   
   // JWT State
   const [jwtInput, setJwtInput] = useState('');
@@ -562,6 +566,159 @@ export default function JsonToolkit() {
     setVizExpanded(paths);
   };
 
+  // Update value at path in visualizer data
+  const updateValueAtPath = useCallback((path, newValue) => {
+    if (!vizParsed.valid || !vizParsed.data) return;
+    
+    const data = JSON.parse(JSON.stringify(vizParsed.data)); // Deep clone
+    const pathParts = path.replace(/\[(\d+)\]/g, '.$1').split('.').filter(p => p && p !== '$');
+    
+    if (pathParts.length === 0) {
+      // Root level - replace entire data
+      setVisualizerJson(vizParsed.format === 'yaml' ? toYamlString(newValue) : toJson(newValue));
+      return;
+    }
+    
+    let current = data;
+    for (let i = 0; i < pathParts.length - 1; i++) {
+      const key = pathParts[i];
+      current = Array.isArray(current) ? current[parseInt(key)] : current[key];
+    }
+    
+    const lastKey = pathParts[pathParts.length - 1];
+    if (Array.isArray(current)) {
+      current[parseInt(lastKey)] = newValue;
+    } else {
+      current[lastKey] = newValue;
+    }
+    
+    setVisualizerJson(vizParsed.format === 'yaml' ? toYamlString(data) : toJson(data));
+  }, [vizParsed]);
+
+  // Update key at path in visualizer data
+  const updateKeyAtPath = useCallback((path, oldKey, newKey) => {
+    if (!vizParsed.valid || !vizParsed.data || oldKey === newKey) return;
+    
+    const data = JSON.parse(JSON.stringify(vizParsed.data));
+    const pathParts = path.replace(/\[(\d+)\]/g, '.$1').split('.').filter(p => p && p !== '$');
+    
+    // Navigate to parent
+    let parent = data;
+    for (let i = 0; i < pathParts.length - 1; i++) {
+      const key = pathParts[i];
+      parent = Array.isArray(parent) ? parent[parseInt(key)] : parent[key];
+    }
+    
+    // Can't rename array indices
+    if (Array.isArray(parent)) return;
+    
+    // Rename key while preserving order
+    const newObj = {};
+    for (const k of Object.keys(parent)) {
+      if (k === oldKey) {
+        newObj[newKey] = parent[k];
+      } else {
+        newObj[k] = parent[k];
+      }
+    }
+    
+    // Replace parent content
+    if (pathParts.length === 1) {
+      // Direct child of root
+      const rootKeys = Object.keys(data);
+      const newData = {};
+      for (const k of rootKeys) {
+        if (k === oldKey) {
+          newData[newKey] = data[k];
+        } else {
+          newData[k] = data[k];
+        }
+      }
+      setVisualizerJson(vizParsed.format === 'yaml' ? toYamlString(newData) : toJson(newData));
+    } else {
+      // Nested - navigate to grandparent
+      let grandparent = data;
+      for (let i = 0; i < pathParts.length - 2; i++) {
+        const key = pathParts[i];
+        grandparent = Array.isArray(grandparent) ? grandparent[parseInt(key)] : grandparent[key];
+      }
+      const parentKey = pathParts[pathParts.length - 2];
+      if (Array.isArray(grandparent)) {
+        grandparent[parseInt(parentKey)] = newObj;
+      } else {
+        grandparent[parentKey] = newObj;
+      }
+      setVisualizerJson(vizParsed.format === 'yaml' ? toYamlString(data) : toJson(data));
+    }
+  }, [vizParsed]);
+
+  // Delete node at path
+  const deleteAtPath = useCallback((path) => {
+    if (!vizParsed.valid || !vizParsed.data) return;
+    
+    const data = JSON.parse(JSON.stringify(vizParsed.data));
+    const pathParts = path.replace(/\[(\d+)\]/g, '.$1').split('.').filter(p => p && p !== '$');
+    
+    if (pathParts.length === 0) return; // Can't delete root
+    
+    let parent = data;
+    for (let i = 0; i < pathParts.length - 1; i++) {
+      const key = pathParts[i];
+      parent = Array.isArray(parent) ? parent[parseInt(key)] : parent[key];
+    }
+    
+    const lastKey = pathParts[pathParts.length - 1];
+    if (Array.isArray(parent)) {
+      parent.splice(parseInt(lastKey), 1);
+    } else {
+      delete parent[lastKey];
+    }
+    
+    setVisualizerJson(vizParsed.format === 'yaml' ? toYamlString(data) : toJson(data));
+  }, [vizParsed]);
+
+  // Add new key-value pair to object or item to array
+  const addAtPath = useCallback((path, isArray) => {
+    if (!vizParsed.valid || !vizParsed.data) return;
+    
+    const data = JSON.parse(JSON.stringify(vizParsed.data));
+    const pathParts = path.replace(/\[(\d+)\]/g, '.$1').split('.').filter(p => p && p !== '$');
+    
+    let target = data;
+    for (const key of pathParts) {
+      target = Array.isArray(target) ? target[parseInt(key)] : target[key];
+    }
+    
+    if (isArray && Array.isArray(target)) {
+      target.push(null);
+    } else if (!isArray && target && typeof target === 'object' && !Array.isArray(target)) {
+      let newKey = 'newKey';
+      let i = 1;
+      while (target.hasOwnProperty(newKey)) {
+        newKey = `newKey${i++}`;
+      }
+      target[newKey] = null;
+    }
+    
+    setVisualizerJson(vizParsed.format === 'yaml' ? toYamlString(data) : toJson(data));
+  }, [vizParsed]);
+
+  // Parse edited value to correct type
+  const parseEditedValue = (val) => {
+    const trimmed = val.trim();
+    if (trimmed === 'null') return null;
+    if (trimmed === 'true') return true;
+    if (trimmed === 'false') return false;
+    if (trimmed === '') return '';
+    if (/^-?\d+$/.test(trimmed)) return parseInt(trimmed, 10);
+    if (/^-?\d*\.\d+$/.test(trimmed)) return parseFloat(trimmed);
+    // Check if it's a quoted string
+    if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+      return trimmed.slice(1, -1);
+    }
+    return val;
+  };
+
   const copy = (text, id) => { navigator.clipboard.writeText(text); setCopied(id); setTimeout(() => setCopied(null), 2000); };
 
   const loadSample = () => {
@@ -674,12 +831,14 @@ export default function JsonToolkit() {
     );
   };
 
-  // Tree Node for Visualizer
-  const VizNode = ({ data, path = '$', keyName = 'root', depth = 0 }) => {
+  // Tree Node for Visualizer (Interactive)
+  const VizNode = ({ data, path = '$', keyName = 'root', depth = 0, parentIsArray = false }) => {
     const type = getType(data);
     const exp = vizExpanded.has(path);
     const hover = vizHover === path;
     const hasKids = (type === 'object' && data && Object.keys(data).length > 0) || (type === 'array' && data.length > 0);
+    const isEditingValue = editingPath === path;
+    const isEditingKey = editingKeyPath === path;
 
     if (vizSearch) {
       const s = vizSearch.toLowerCase();
@@ -692,14 +851,118 @@ export default function JsonToolkit() {
       } else if (!match) return null;
     }
 
+    const startEditValue = (e) => {
+      e.stopPropagation();
+      if (type === 'object' || type === 'array') return;
+      setEditingPath(path);
+      setEditingValue(data === null ? 'null' : type === 'string' ? data : String(data));
+    };
+
+    const startEditKey = (e) => {
+      e.stopPropagation();
+      if (parentIsArray || depth === 0) return; // Can't edit array indices or root
+      setEditingKeyPath(path);
+      setEditingKeyValue(String(keyName));
+    };
+
+    const saveValue = () => {
+      const parsed = parseEditedValue(editingValue);
+      updateValueAtPath(path, parsed);
+      setEditingPath(null);
+      setEditingValue('');
+    };
+
+    const saveKey = () => {
+      updateKeyAtPath(path, String(keyName), editingKeyValue);
+      setEditingKeyPath(null);
+      setEditingKeyValue('');
+    };
+
+    const cancelEdit = () => {
+      setEditingPath(null);
+      setEditingValue('');
+      setEditingKeyPath(null);
+      setEditingKeyValue('');
+    };
+
+    const handleValueKeyDown = (e) => {
+      if (e.key === 'Enter') saveValue();
+      if (e.key === 'Escape') cancelEdit();
+    };
+
+    const handleKeyKeyDown = (e) => {
+      if (e.key === 'Enter') saveKey();
+      if (e.key === 'Escape') cancelEdit();
+    };
+
     const renderVal = () => {
-      if (type === 'null') return <span style={{ color: t.null, fontStyle: 'italic' }}>null</span>;
-      if (type === 'string') return <span style={{ color: t.string }}>"{data.length > 40 ? data.slice(0, 40) + '...' : data}"</span>;
-      if (type === 'number') return <span style={{ color: t.number }}>{data}</span>;
-      if (type === 'boolean') return <span style={{ color: t.boolean }}>{String(data)}</span>;
+      if (isEditingValue) {
+        return (
+          <input
+            autoFocus
+            value={editingValue}
+            onChange={e => setEditingValue(e.target.value)}
+            onBlur={saveValue}
+            onKeyDown={handleValueKeyDown}
+            onClick={e => e.stopPropagation()}
+            style={{ 
+              padding: '1px 4px', 
+              background: t.bgTertiary, 
+              border: `1px solid ${t.accent}`, 
+              borderRadius: 3, 
+              color: t.text, 
+              fontSize: 11, 
+              fontFamily: 'monospace',
+              outline: 'none',
+              minWidth: 60,
+              maxWidth: 200
+            }}
+          />
+        );
+      }
+      if (type === 'null') return <span style={{ color: t.null, fontStyle: 'italic', cursor: 'pointer' }} onDoubleClick={startEditValue}>null</span>;
+      if (type === 'string') return <span style={{ color: t.string, cursor: 'pointer' }} onDoubleClick={startEditValue}>"{data.length > 40 ? data.slice(0, 40) + '...' : data}"</span>;
+      if (type === 'number') return <span style={{ color: t.number, cursor: 'pointer' }} onDoubleClick={startEditValue}>{data}</span>;
+      if (type === 'boolean') return <span style={{ color: t.boolean, cursor: 'pointer' }} onDoubleClick={startEditValue}>{String(data)}</span>;
       if (type === 'array') return <span style={{ color: t.bracket }}>[</span>;
       if (type === 'object') return <span style={{ color: t.bracket }}>{'{'}</span>;
       return null;
+    };
+
+    const renderKey = () => {
+      if (isEditingKey) {
+        return (
+          <input
+            autoFocus
+            value={editingKeyValue}
+            onChange={e => setEditingKeyValue(e.target.value)}
+            onBlur={saveKey}
+            onKeyDown={handleKeyKeyDown}
+            onClick={e => e.stopPropagation()}
+            style={{ 
+              padding: '1px 4px', 
+              background: t.bgTertiary, 
+              border: `1px solid ${t.accent}`, 
+              borderRadius: 3, 
+              color: t.key, 
+              fontSize: 11, 
+              fontFamily: 'monospace',
+              outline: 'none',
+              minWidth: 40,
+              maxWidth: 150
+            }}
+          />
+        );
+      }
+      return (
+        <span 
+          style={{ color: t.key, fontFamily: 'monospace', fontSize: 11, cursor: parentIsArray ? 'default' : 'pointer' }} 
+          onDoubleClick={startEditKey}
+          title={parentIsArray ? 'Array index (read-only)' : 'Double-click to edit key'}
+        >
+          "{keyName}"
+        </span>
+      );
     };
 
     return (
@@ -708,12 +971,21 @@ export default function JsonToolkit() {
           <div style={{ width: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             {hasKids && <span style={{ transform: exp ? 'rotate(90deg)' : '', transition: 'transform 0.15s', color: t.textMuted, fontSize: 10 }}>▶</span>}
           </div>
-          {depth > 0 && <span style={{ color: t.key, fontFamily: 'monospace', fontSize: 11 }}>"{keyName}"</span>}
+          {depth > 0 && renderKey()}
           {depth > 0 && <span style={{ color: t.textMuted, margin: '0 4px' }}>:</span>}
           <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{renderVal()}</span>
           {hasKids && !exp && <span style={{ color: t.textDim, fontSize: 10, marginLeft: 4 }}>{type === 'array' ? `${data.length}]` : `${Object.keys(data).length}}`}</span>}
           {hover && (
             <div style={{ marginLeft: 'auto', display: 'flex', gap: 2 }}>
+              {(type === 'object' || type === 'array') && (
+                <button onClick={e => { e.stopPropagation(); addAtPath(path, type === 'array'); }} style={{ padding: '1px 4px', background: t.successLight, border: 'none', borderRadius: 3, color: t.success, cursor: 'pointer', fontSize: 9 }} title={type === 'array' ? 'Add item' : 'Add key'}>+</button>
+              )}
+              {type !== 'object' && type !== 'array' && (
+                <button onClick={startEditValue} style={{ padding: '1px 4px', background: t.warningLight, border: 'none', borderRadius: 3, color: t.warning, cursor: 'pointer', fontSize: 9 }} title="Edit value">✎</button>
+              )}
+              {depth > 0 && (
+                <button onClick={e => { e.stopPropagation(); if (confirm('Delete this item?')) deleteAtPath(path); }} style={{ padding: '1px 4px', background: t.errorLight, border: 'none', borderRadius: 3, color: t.error, cursor: 'pointer', fontSize: 9 }} title="Delete">×</button>
+              )}
               <button onClick={e => { e.stopPropagation(); copy(JSON.stringify(data, null, 2), path); }} style={{ padding: '1px 4px', background: t.bgTertiary, border: 'none', borderRadius: 3, color: copied === path ? t.success : t.textMuted, cursor: 'pointer', fontSize: 9 }}>{copied === path ? '✓' : 'Copy'}</button>
               <button onClick={e => { e.stopPropagation(); copy(path, `p-${path}`); }} style={{ padding: '1px 4px', background: t.bgTertiary, border: 'none', borderRadius: 3, color: copied === `p-${path}` ? t.success : t.textMuted, cursor: 'pointer', fontSize: 9 }}>{copied === `p-${path}` ? '✓' : 'Path'}</button>
             </div>
@@ -721,7 +993,7 @@ export default function JsonToolkit() {
         </div>
         {hasKids && exp && (
           <div style={{ borderLeft: `1px dashed ${t.border}`, marginLeft: 7, paddingLeft: 2 }}>
-            {type === 'array' ? data.map((x, i) => <VizNode key={`${path}[${i}]`} data={x} path={`${path}[${i}]`} keyName={i} depth={depth + 1} />) : Object.entries(data).map(([k, v]) => <VizNode key={`${path}.${k}`} data={v} path={`${path}.${k}`} keyName={k} depth={depth + 1} />)}
+            {type === 'array' ? data.map((x, i) => <VizNode key={`${path}[${i}]`} data={x} path={`${path}[${i}]`} keyName={i} depth={depth + 1} parentIsArray={true} />) : Object.entries(data).map(([k, v]) => <VizNode key={`${path}.${k}`} data={v} path={`${path}.${k}`} keyName={k} depth={depth + 1} parentIsArray={false} />)}
             <div style={{ padding: '2px 6px', marginLeft: 16, fontFamily: 'monospace', fontSize: 11, color: t.bracket }}>{type === 'array' ? ']' : '}'}</div>
           </div>
         )}
@@ -888,6 +1160,15 @@ export default function JsonToolkit() {
         {/* VISUALIZER TAB */}
         {activeTab === 'visualizer' && (
           <>
+            {/* Interactive hint banner */}
+            <div style={{ background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(16, 185, 129, 0.1))', border: `1px solid ${t.border}`, borderRadius: 6, padding: '10px 14px', marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+              <span style={{ fontSize: 11, color: t.text }}>✨ <strong>Interactive Editor</strong> — Double-click values or keys to edit. Hover for <span style={{ color: t.success }}>+</span> <span style={{ color: t.warning }}>✎</span> <span style={{ color: t.error }}>×</span> actions.</span>
+              <div style={{ display: 'flex', gap: 6, fontSize: 9, color: t.textMuted }}>
+                <span style={{ padding: '2px 6px', background: t.bgTertiary, borderRadius: 3 }}>Double-click = Edit</span>
+                <span style={{ padding: '2px 6px', background: t.bgTertiary, borderRadius: 3 }}>Enter = Save</span>
+                <span style={{ padding: '2px 6px', background: t.bgTertiary, borderRadius: 3 }}>Esc = Cancel</span>
+              </div>
+            </div>
             <div style={{ marginBottom: 14 }}>
               <InputPanel side="viz" label="JSON or YAML Input" color={t.accent} value={visualizerJson} setter={setVisualizerJson} parsed={vizParsed} height={140} />
             </div>
@@ -914,7 +1195,10 @@ export default function JsonToolkit() {
                 </div>
                 <div style={{ background: t.bgSecondary, borderRadius: 8, border: `1px solid ${t.border}`, overflow: 'hidden' }}>
                   <div style={{ padding: '8px 10px', background: t.bgTertiary, borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span style={{ fontSize: 10, fontWeight: 600, color: t.text }}>Tree View</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: 10, fontWeight: 600, color: t.text }}>Interactive Tree View</span>
+                      <span style={{ fontSize: 8, padding: '2px 5px', background: t.accentLight, color: t.accent, borderRadius: 3, fontWeight: 600 }}>EDITABLE</span>
+                    </div>
                     <div style={{ display: 'flex', gap: 8, fontSize: 9, color: t.textMuted }}>
                       <span><span style={{ color: t.key }}>●</span> Key</span>
                       <span><span style={{ color: t.string }}>●</span> String</span>
@@ -928,8 +1212,8 @@ export default function JsonToolkit() {
             )}
             {!vizParsed.data && (
               <div style={{ background: t.bgSecondary, borderRadius: 8, border: `1px solid ${t.border}`, padding: 40, textAlign: 'center' }}>
-                <p style={{ fontSize: 12, fontWeight: 500, color: t.text, marginBottom: 4 }}>Visualize Data</p>
-                <p style={{ fontSize: 10, color: t.textMuted, marginBottom: 12 }}>Paste JSON or YAML to explore</p>
+                <p style={{ fontSize: 12, fontWeight: 500, color: t.text, marginBottom: 4 }}>Interactive Data Editor</p>
+                <p style={{ fontSize: 10, color: t.textMuted, marginBottom: 12 }}>Paste JSON or YAML to explore and edit</p>
                 <button onClick={loadSample} style={{ padding: '8px 14px', background: `linear-gradient(135deg, ${t.accent}, #10b981)`, border: 'none', borderRadius: 5, color: 'white', cursor: 'pointer', fontSize: 10, fontWeight: 600 }}>Load Sample</button>
               </div>
             )}
@@ -1197,7 +1481,7 @@ export default function JsonToolkit() {
 
         {/* Features */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 8, marginTop: 20 }}>
-          {[{ i: '🔄', t: 'JSON↔YAML', d: 'Convert formats' }, { i: '🌳', t: 'Tree Diff', d: 'Visual compare' }, { i: '🔍', t: 'Visualize', d: 'Explore data' }, { i: '✅', t: 'Validate', d: 'Check syntax' }, { i: '🔐', t: 'JWT', d: 'Decode tokens' }, { i: '🌓', t: 'Themes', d: 'Dark & light' }].map((f, i) => (
+          {[{ i: '🔄', t: 'JSON↔YAML', d: 'Convert formats' }, { i: '🌳', t: 'Tree Diff', d: 'Visual compare' }, { i: '✏️', t: 'Editor', d: 'Edit in tree' }, { i: '✅', t: 'Validate', d: 'Check syntax' }, { i: '🔐', t: 'JWT', d: 'Decode tokens' }, { i: '🌓', t: 'Themes', d: 'Dark & light' }].map((f, i) => (
             <div key={i} style={{ padding: 10, background: t.bgSecondary, borderRadius: 6, border: `1px solid ${t.border}` }}>
               <div style={{ fontSize: 16, marginBottom: 4 }}>{f.i}</div>
               <h3 style={{ margin: 0, fontSize: 10, fontWeight: 600, color: t.text }}>{f.t}</h3>
