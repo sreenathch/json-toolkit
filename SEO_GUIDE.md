@@ -4,8 +4,8 @@
 
 ### Meta Tags (in index.html)
 - Title optimized for search: "JSON/YAML Formatter, Converter, Diff & JWT Decoder"
-- Description (160 chars) with key features including JWT
-- Keywords covering JSON, YAML, and JWT terms
+- Description (160 chars) with key features including JWT, interactive editor, diff revert
+- Keywords covering JSON, YAML, JWT, editor, and diff merge terms
 - Canonical URL
 - Robots directives
 
@@ -15,8 +15,8 @@
 - Twitter card tags
 
 ### Structured Data (JSON-LD)
-- WebApplication schema with features list
-- FAQPage schema for rich snippets
+- WebApplication schema with 23+ features listed
+- FAQPage schema with 8 questions for rich snippets
 
 ### Technical SEO
 - sitemap.xml
@@ -33,15 +33,16 @@
 | json formatter | 74,000 |
 | jwt decoder | 40,500 |
 | json editor | 27,100 |
+| json diff | 8,000 |
 | yaml formatter | 12,000 |
 | json viewer | 22,000 |
 | jwt decode | 33,100 |
 | json validator | 18,000 |
+| json merge | 6,600 |
 | yaml validator | 6,600 |
 | json to yaml | 14,800 |
 | yaml to json | 8,100 |
 | json compare | 12,000 |
-| json diff | 8,000 |
 | jwt debugger | 9,900 |
 
 ### Long-Tail Keywords (Lower Competition)
@@ -68,6 +69,13 @@
 - json tree editor
 - json editor with tree view
 - edit json values online
+- json diff merge tool
+- merge json files online
+- sync json documents
+- revert json changes
+- json diff with merge
+- compare and merge json
+- json diff sync tool
 
 ---
 
@@ -124,7 +132,7 @@
 - [SaaSHub](https://saashub.com)
 
 ### GitHub
-- Add topics: `json`, `yaml`, `jwt`, `jwt-decoder`, `formatter`, `validator`, `diff`, `converter`, `developer-tools`
+- Add topics: `json`, `yaml`, `jwt`, `jwt-decoder`, `formatter`, `validator`, `diff`, `merge`, `converter`, `editor`, `developer-tools`
 - Create good README with badges
 - Add to awesome-json, awesome-yaml, and awesome-jwt lists
 
@@ -144,14 +152,18 @@
 9. "How to Check if a JWT Token is Expired"
 10. "Edit JSON Values in a Tree View - Interactive Guide"
 11. "How to Add and Delete Keys in JSON Online"
+12. "How to Merge JSON Files and Sync Changes"
+13. "JSON Diff with Revert: Sync Documents Easily"
+14. "Adding Objects, Arrays, and Values to JSON Online"
 
 ### Comparison Posts
 1. "JSON Toolkit vs JSONLint vs JSON Editor Online"
-2. "Best Free YAML Validators in 2025"
+2. "Best Free YAML Validators in 2026"
 3. "Top 10 JSON Tools for Developers"
 4. "JWT.io vs JSON Toolkit: Which JWT Decoder is Better?"
-5. "Best Free JWT Decoders in 2025"
-6. "Best Interactive JSON Editors Online (2025)"
+5. "Best Free JWT Decoders in 2026"
+6. "Best Interactive JSON Editors Online (2026)"
+7. "Best JSON Diff and Merge Tools (2026)"
 
 ---
 
@@ -179,38 +191,53 @@
 
 ---
 
-## 🆕 Updated LinkedIn Post (with Interactive Editor)
+## 🆕 Updated LinkedIn Post (v1.4 - Full Feature Set)
 
 ```
-🚀 I built a free JSON/YAML/JWT Toolkit for developers!
+🚀 Just shipped a major update to JSON/YAML Toolkit!
 
-Tired of switching between multiple tools?
+Every developer's been here:
+❌ Tab 1: format JSON
+❌ Tab 2: validate it
+❌ Tab 3: convert to YAML
+❌ Tab 4: compare files
+❌ Tab 5: decode JWT
+❌ ...and lose track of everything
 
-JSON/YAML Toolkit does it all:
-✅ JSON ↔ YAML Converter
-✅ Formatter & Beautifier  
-✅ Validator with error line numbers
-✅ Diff Checker - compare visually
-✅ 🔐 JWT Decoder & Encoder
+JSON/YAML Toolkit does ALL of this in one place:
 
-🆕 **Interactive Tree Editor:**
-✅ ✏️ Double-click to edit values inline
-✅ ✏️ Rename keys directly in tree
-✅ ➕ Add new keys or array items
-✅ ❌ Delete nodes with one click
-✅ 🔄 Changes sync in real-time!
+🔄 **Convert** - JSON ↔ YAML instantly
+✅ **Validate** - Error line numbers included
+🔍 **Diff** - Visual tree comparison
+
+🆕 **Diff with Revert:**
+→ Hover any difference to sync values
+→ One-click: copy left→right or right→left
+→ Merge JSON files effortlessly!
+
+✏️ **Interactive Tree Editor:**
+→ Double-click to edit any value
+→ Rename keys in place
+→ Add STRING, NUMBER, OBJECT, ARRAY, BOOLEAN, or NULL
+→ Delete with one click
+→ Real-time sync!
+
+🔐 **JWT Decoder/Encoder:**
+→ Decode tokens instantly
+→ Analyze claims & expiration
+→ Create test tokens
 
 The best part?
-✅ Works with JSON, YAML, AND JWT
 ✅ 100% free, no ads, no sign-up
 ✅ Your data never leaves your browser
+✅ Works offline!
 
 Try it → https://lnkd.in/gmAmpZ76
-Star it → https://lnkd.in/gzcMr7Gz
+⭐ Star it → https://lnkd.in/gzcMr7Gz
 
-What developer tool do you wish existed? 👇
+What feature should I add next? 👇
 
-#WebDevelopment #JavaScript #DevOps #YAML #JSON #JWT #API #OpenSource #BuildInPublic #DeveloperTools
+#WebDevelopment #JavaScript #DevOps #YAML #JSON #JWT #API #OpenSource #BuildInPublic #DeveloperTools #Programming
 ```
 
 ---

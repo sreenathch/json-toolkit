@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 
 // Simple YAML Parser (handles common cases)
 const yamlParse = (str) => {
@@ -418,6 +418,8 @@ export default function JsonToolkit() {
   const [editingValue, setEditingValue] = useState('');
   const [editingKeyPath, setEditingKeyPath] = useState(null);
   const [editingKeyValue, setEditingKeyValue] = useState('');
+  const [addMenuPath, setAddMenuPath] = useState(null);
+  const [diffHover, setDiffHover] = useState(null);
   
   // JWT State
   const [jwtInput, setJwtInput] = useState('');
@@ -453,6 +455,15 @@ export default function JsonToolkit() {
       setConverterOutput('');
     }
   }, [convParsed, outputFormat]);
+
+  // Close add menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = () => setAddMenuPath(null);
+    if (addMenuPath) {
+      document.addEventListener('click', handleClickOutside);
+      return () => document.removeEventListener('click', handleClickOutside);
+    }
+  }, [addMenuPath]);
 
   const getType = (v) => v === null ? 'null' : Array.isArray(v) ? 'array' : typeof v;
 
@@ -677,8 +688,8 @@ export default function JsonToolkit() {
     setVisualizerJson(vizParsed.format === 'yaml' ? toYamlString(data) : toJson(data));
   }, [vizParsed]);
 
-  // Add new key-value pair to object or item to array
-  const addAtPath = useCallback((path, isArray) => {
+  // Add new key-value pair to object or item to array with type selection
+  const addAtPath = useCallback((path, isArray, valueType = 'null') => {
     if (!vizParsed.valid || !vizParsed.data) return;
     
     const data = JSON.parse(JSON.stringify(vizParsed.data));
@@ -689,18 +700,30 @@ export default function JsonToolkit() {
       target = Array.isArray(target) ? target[parseInt(key)] : target[key];
     }
     
+    // Determine the value based on type
+    let newValue;
+    switch (valueType) {
+      case 'string': newValue = ''; break;
+      case 'number': newValue = 0; break;
+      case 'boolean': newValue = false; break;
+      case 'object': newValue = {}; break;
+      case 'array': newValue = []; break;
+      default: newValue = null;
+    }
+    
     if (isArray && Array.isArray(target)) {
-      target.push(null);
+      target.push(newValue);
     } else if (!isArray && target && typeof target === 'object' && !Array.isArray(target)) {
       let newKey = 'newKey';
       let i = 1;
       while (target.hasOwnProperty(newKey)) {
         newKey = `newKey${i++}`;
       }
-      target[newKey] = null;
+      target[newKey] = newValue;
     }
     
     setVisualizerJson(vizParsed.format === 'yaml' ? toYamlString(data) : toJson(data));
+    setAddMenuPath(null);
   }, [vizParsed]);
 
   // Parse edited value to correct type
@@ -768,6 +791,94 @@ export default function JsonToolkit() {
     if (p.valid && p.data) s(p.format === 'yaml' ? toYamlString(sortObj(p.data)) : toJson(sortObj(p.data)));
   };
 
+  // Revert functions for diff - apply value from one side to the other
+  const applyValueAtPath = useCallback((targetSide, path, value) => {
+    const [parsed, setter] = targetSide === 'left' ? [leftParsed, setLeftJson] : [rightParsed, setRightJson];
+    if (!parsed.valid || !parsed.data) return;
+    
+    const data = JSON.parse(JSON.stringify(parsed.data));
+    const pathParts = path.replace(/\[(\d+)\]/g, '.$1').split('.').filter(p => p && p !== '$');
+    
+    if (pathParts.length === 0) {
+      // Root level - replace entire data
+      setter(parsed.format === 'yaml' ? toYamlString(value) : toJson(value));
+      return;
+    }
+    
+    let current = data;
+    for (let i = 0; i < pathParts.length - 1; i++) {
+      const key = pathParts[i];
+      if (current[key] === undefined) {
+        // Create intermediate path if it doesn't exist
+        current[key] = /^\d+$/.test(pathParts[i + 1]) ? [] : {};
+      }
+      current = Array.isArray(current) ? current[parseInt(key)] : current[key];
+    }
+    
+    const lastKey = pathParts[pathParts.length - 1];
+    if (Array.isArray(current)) {
+      current[parseInt(lastKey)] = value;
+    } else {
+      current[lastKey] = value;
+    }
+    
+    setter(parsed.format === 'yaml' ? toYamlString(data) : toJson(data));
+  }, [leftParsed, rightParsed]);
+
+  const deleteAtPathDiff = useCallback((targetSide, path) => {
+    const [parsed, setter] = targetSide === 'left' ? [leftParsed, setLeftJson] : [rightParsed, setRightJson];
+    if (!parsed.valid || !parsed.data) return;
+    
+    const data = JSON.parse(JSON.stringify(parsed.data));
+    const pathParts = path.replace(/\[(\d+)\]/g, '.$1').split('.').filter(p => p && p !== '$');
+    
+    if (pathParts.length === 0) return; // Can't delete root
+    
+    let parent = data;
+    for (let i = 0; i < pathParts.length - 1; i++) {
+      const key = pathParts[i];
+      parent = Array.isArray(parent) ? parent[parseInt(key)] : parent[key];
+      if (parent === undefined) return;
+    }
+    
+    const lastKey = pathParts[pathParts.length - 1];
+    if (Array.isArray(parent)) {
+      parent.splice(parseInt(lastKey), 1);
+    } else {
+      delete parent[lastKey];
+    }
+    
+    setter(parsed.format === 'yaml' ? toYamlString(data) : toJson(data));
+  }, [leftParsed, rightParsed]);
+
+  // Revert left to right (make left same as right)
+  const revertToRight = useCallback((node) => {
+    if (node.status === 'added') {
+      // Added in right, add to left
+      applyValueAtPath('left', node.path, node.rv);
+    } else if (node.status === 'removed') {
+      // Removed from right, delete from left
+      deleteAtPathDiff('left', node.path);
+    } else if (node.status === 'modified' || node.status === 'type_changed') {
+      // Modified, update left with right value
+      applyValueAtPath('left', node.path, node.rv);
+    }
+  }, [applyValueAtPath, deleteAtPathDiff]);
+
+  // Revert right to left (make right same as left)
+  const revertToLeft = useCallback((node) => {
+    if (node.status === 'added') {
+      // Added in right, delete from right
+      deleteAtPathDiff('right', node.path);
+    } else if (node.status === 'removed') {
+      // Removed from right, add to right
+      applyValueAtPath('right', node.path, node.lv);
+    } else if (node.status === 'modified' || node.status === 'type_changed') {
+      // Modified, update right with left value
+      applyValueAtPath('right', node.path, node.lv);
+    }
+  }, [applyValueAtPath, deleteAtPathDiff]);
+
   const statusCfg = {
     added: { bg: t.name === 'dark' ? '#052e16' : '#dcfce7', border: '#16a34a', color: t.name === 'dark' ? '#4ade80' : '#16a34a' },
     removed: { bg: t.name === 'dark' ? '#450a0a' : '#fee2e2', border: '#dc2626', color: t.name === 'dark' ? '#f87171' : '#dc2626' },
@@ -800,6 +911,7 @@ export default function JsonToolkit() {
     const hasKids = node.children.length > 0;
     const cfg = statusCfg[node.status];
     const isLeaf = !hasKids || node.status === 'type_changed';
+    const isHovered = diffHover === node.path;
 
     if (searchTerm && !node.path.toLowerCase().includes(searchTerm.toLowerCase())) {
       const match = node.children.some(c => c.path.toLowerCase().includes(searchTerm.toLowerCase()));
@@ -809,7 +921,12 @@ export default function JsonToolkit() {
 
     return (
       <div style={{ marginLeft: depth > 0 ? 16 : 0 }}>
-        <div onClick={() => hasKids && toggle(node.path, setExpandedNodes)} style={{ display: 'flex', alignItems: 'center', padding: '4px 0', cursor: hasKids ? 'pointer' : 'default', borderLeft: `3px solid ${cfg.border}`, marginBottom: 2, background: node.status !== 'unchanged' ? cfg.bg : 'transparent', borderRadius: '0 6px 6px 0' }}>
+        <div 
+          onClick={() => hasKids && toggle(node.path, setExpandedNodes)} 
+          onMouseEnter={() => setDiffHover(node.path)}
+          onMouseLeave={() => setDiffHover(null)}
+          style={{ display: 'flex', alignItems: 'center', padding: '4px 0', cursor: hasKids ? 'pointer' : 'default', borderLeft: `3px solid ${cfg.border}`, marginBottom: 2, background: node.status !== 'unchanged' ? cfg.bg : 'transparent', borderRadius: '0 6px 6px 0' }}
+        >
           <div style={{ width: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             {hasKids && <span style={{ transform: exp ? 'rotate(90deg)' : '', transition: 'transform 0.15s', color: t.textMuted }}>▶</span>}
           </div>
@@ -818,13 +935,59 @@ export default function JsonToolkit() {
             {node.status !== 'unchanged' && <span style={{ padding: '1px 4px', borderRadius: 3, fontSize: 8, fontWeight: 700, background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}` }}>{node.status === 'added' ? '+' : node.status === 'removed' ? '−' : node.status === 'modified' ? '~' : '⇄'}</span>}
           </div>
           {isLeaf && (
-            <div style={{ display: 'flex', flex: 1, gap: 8, alignItems: 'center', paddingRight: 8 }}>
-              <div style={{ flex: 1, padding: '2px 6px', borderRadius: 4, fontFamily: 'monospace', fontSize: 10, background: ['removed', 'modified', 'type_changed'].includes(node.status) ? t.errorLight : t.bgTertiary }}>{fmtVal(node.lv, node.lt)}</div>
-              <span style={{ color: t.textDim }}>→</span>
-              <div style={{ flex: 1, padding: '2px 6px', borderRadius: 4, fontFamily: 'monospace', fontSize: 10, background: ['added', 'modified', 'type_changed'].includes(node.status) ? t.successLight : t.bgTertiary }}>{fmtVal(node.rv, node.rt)}</div>
+            <div style={{ display: 'flex', flex: 1, gap: 4, alignItems: 'center', paddingRight: 8 }}>
+              {/* Left value with revert button */}
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <div style={{ flex: 1, padding: '2px 6px', borderRadius: 4, fontFamily: 'monospace', fontSize: 10, background: ['removed', 'modified', 'type_changed'].includes(node.status) ? t.errorLight : t.bgTertiary }}>{fmtVal(node.lv, node.lt)}</div>
+                {isHovered && node.status !== 'unchanged' && (
+                  <button 
+                    onClick={e => { e.stopPropagation(); revertToLeft(node); }} 
+                    style={{ padding: '2px 4px', background: t.bgTertiary, border: `1px solid ${t.border}`, borderRadius: 3, color: t.textSecondary, cursor: 'pointer', fontSize: 8, whiteSpace: 'nowrap' }}
+                    title="Apply left value to right"
+                  >
+                    →
+                  </button>
+                )}
+              </div>
+              <span style={{ color: t.textDim, fontSize: 10 }}>⟷</span>
+              {/* Right value with revert button */}
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 4 }}>
+                {isHovered && node.status !== 'unchanged' && (
+                  <button 
+                    onClick={e => { e.stopPropagation(); revertToRight(node); }} 
+                    style={{ padding: '2px 4px', background: t.bgTertiary, border: `1px solid ${t.border}`, borderRadius: 3, color: t.textSecondary, cursor: 'pointer', fontSize: 8, whiteSpace: 'nowrap' }}
+                    title="Apply right value to left"
+                  >
+                    ←
+                  </button>
+                )}
+                <div style={{ flex: 1, padding: '2px 6px', borderRadius: 4, fontFamily: 'monospace', fontSize: 10, background: ['added', 'modified', 'type_changed'].includes(node.status) ? t.successLight : t.bgTertiary }}>{fmtVal(node.rv, node.rt)}</div>
+              </div>
             </div>
           )}
-          {!isLeaf && <span style={{ color: t.textMuted, fontSize: 10, fontFamily: 'monospace' }}>{node.lt === 'array' ? `[${node.lv?.length || 0}]` : `{${Object.keys(node.lv || {}).length}}`}{node.status === 'modified' && <span style={{ color: t.warning, marginLeft: 4 }}>•</span>}</span>}
+          {!isLeaf && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ color: t.textMuted, fontSize: 10, fontFamily: 'monospace' }}>{node.lt === 'array' ? `[${node.lv?.length || 0}]` : `{${Object.keys(node.lv || {}).length}}`}{node.status === 'modified' && <span style={{ color: t.warning, marginLeft: 4 }}>•</span>}</span>
+              {isHovered && node.status !== 'unchanged' && (
+                <div style={{ display: 'flex', gap: 2 }}>
+                  <button 
+                    onClick={e => { e.stopPropagation(); revertToLeft(node); }} 
+                    style={{ padding: '2px 5px', background: t.bgTertiary, border: `1px solid ${t.border}`, borderRadius: 3, color: t.textSecondary, cursor: 'pointer', fontSize: 8 }}
+                    title="Apply left to right"
+                  >
+                    L→R
+                  </button>
+                  <button 
+                    onClick={e => { e.stopPropagation(); revertToRight(node); }} 
+                    style={{ padding: '2px 5px', background: t.bgTertiary, border: `1px solid ${t.border}`, borderRadius: 3, color: t.textSecondary, cursor: 'pointer', fontSize: 8 }}
+                    title="Apply right to left"
+                  >
+                    R→L
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
         {hasKids && exp && <div style={{ borderLeft: `1px solid ${t.border}`, marginLeft: 9 }}>{node.children.map(c => <DiffNode key={c.path} node={c} depth={depth + 1} />)}</div>}
       </div>
@@ -966,8 +1129,8 @@ export default function JsonToolkit() {
     };
 
     return (
-      <div style={{ marginLeft: depth > 0 ? 14 : 0 }}>
-        <div onClick={() => hasKids && toggle(path, setVizExpanded)} onMouseEnter={() => setVizHover(path)} onMouseLeave={() => setVizHover(null)} style={{ display: 'flex', alignItems: 'center', padding: '3px 6px', borderRadius: 4, cursor: hasKids ? 'pointer' : 'default', background: hover ? t.bgHover : 'transparent' }}>
+      <div style={{ marginLeft: depth > 0 ? 14 : 0, position: 'relative' }}>
+        <div onClick={() => hasKids && toggle(path, setVizExpanded)} onMouseEnter={() => setVizHover(path)} onMouseLeave={() => { if (addMenuPath !== path) setVizHover(null); }} style={{ display: 'flex', alignItems: 'center', padding: '3px 6px', borderRadius: 4, cursor: hasKids ? 'pointer' : 'default', background: hover ? t.bgHover : 'transparent' }}>
           <div style={{ width: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             {hasKids && <span style={{ transform: exp ? 'rotate(90deg)' : '', transition: 'transform 0.15s', color: t.textMuted, fontSize: 10 }}>▶</span>}
           </div>
@@ -975,10 +1138,69 @@ export default function JsonToolkit() {
           {depth > 0 && <span style={{ color: t.textMuted, margin: '0 4px' }}>:</span>}
           <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{renderVal()}</span>
           {hasKids && !exp && <span style={{ color: t.textDim, fontSize: 10, marginLeft: 4 }}>{type === 'array' ? `${data.length}]` : `${Object.keys(data).length}}`}</span>}
+          {/* Action buttons - closer to content */}
           {hover && (
-            <div style={{ marginLeft: 'auto', display: 'flex', gap: 2 }}>
+            <div style={{ marginLeft: 8, display: 'flex', gap: 2, alignItems: 'center' }}>
               {(type === 'object' || type === 'array') && (
-                <button onClick={e => { e.stopPropagation(); addAtPath(path, type === 'array'); }} style={{ padding: '1px 4px', background: t.successLight, border: 'none', borderRadius: 3, color: t.success, cursor: 'pointer', fontSize: 9 }} title={type === 'array' ? 'Add item' : 'Add key'}>+</button>
+                <div style={{ position: 'relative' }}>
+                  <button 
+                    onClick={e => { e.stopPropagation(); setAddMenuPath(addMenuPath === path ? null : path); }} 
+                    style={{ padding: '1px 4px', background: t.successLight, border: 'none', borderRadius: 3, color: t.success, cursor: 'pointer', fontSize: 9 }} 
+                    title={type === 'array' ? 'Add item' : 'Add key'}
+                  >+</button>
+                  {/* Add Menu Dropdown */}
+                  {addMenuPath === path && (
+                    <div 
+                      style={{ 
+                        position: 'absolute', 
+                        top: '100%', 
+                        left: 0, 
+                        zIndex: 100, 
+                        background: t.bgSecondary, 
+                        border: `1px solid ${t.border}`, 
+                        borderRadius: 6, 
+                        boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                        padding: 4,
+                        minWidth: 100
+                      }}
+                      onClick={e => e.stopPropagation()}
+                    >
+                      <div style={{ fontSize: 8, color: t.textMuted, padding: '2px 6px', marginBottom: 2, borderBottom: `1px solid ${t.border}` }}>Add {type === 'array' ? 'Item' : 'Key'}</div>
+                      {[
+                        { type: 'string', icon: '""', label: 'String' },
+                        { type: 'number', icon: '123', label: 'Number' },
+                        { type: 'boolean', icon: '✓✗', label: 'Boolean' },
+                        { type: 'null', icon: '∅', label: 'Null' },
+                        { type: 'object', icon: '{ }', label: 'Object' },
+                        { type: 'array', icon: '[ ]', label: 'Array' },
+                      ].map(opt => (
+                        <button
+                          key={opt.type}
+                          onClick={e => { e.stopPropagation(); addAtPath(path, type === 'array', opt.type); }}
+                          style={{ 
+                            display: 'flex', 
+                            alignItems: 'center', 
+                            gap: 6, 
+                            width: '100%', 
+                            padding: '4px 6px', 
+                            background: 'transparent', 
+                            border: 'none', 
+                            borderRadius: 3, 
+                            color: t.text, 
+                            cursor: 'pointer', 
+                            fontSize: 10,
+                            textAlign: 'left'
+                          }}
+                          onMouseEnter={e => e.target.style.background = t.bgHover}
+                          onMouseLeave={e => e.target.style.background = 'transparent'}
+                        >
+                          <span style={{ fontFamily: 'monospace', fontSize: 9, color: t.textMuted, width: 20 }}>{opt.icon}</span>
+                          <span>{opt.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               )}
               {type !== 'object' && type !== 'array' && (
                 <button onClick={startEditValue} style={{ padding: '1px 4px', background: t.warningLight, border: 'none', borderRadius: 3, color: t.warning, cursor: 'pointer', fontSize: 9 }} title="Edit value">✎</button>
@@ -1101,6 +1323,18 @@ export default function JsonToolkit() {
               </div>
             )}
 
+            {/* Revert hint banner */}
+            {diffTree && (stats.added > 0 || stats.removed > 0 || stats.modified > 0) && (
+              <div style={{ background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.05), rgba(34, 197, 94, 0.05))', border: `1px solid ${t.border}`, borderRadius: 6, padding: '8px 14px', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 10, color: t.text }}>🔄 <strong>Revert Changes</strong> — Hover over differences to sync values:</span>
+                <div style={{ display: 'flex', gap: 8, fontSize: 9, color: t.textMuted }}>
+                  <span style={{ padding: '2px 6px', background: t.bgTertiary, borderRadius: 3, display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ fontWeight: 600 }}>←</span> Apply right → left</span>
+                  <span style={{ padding: '2px 6px', background: t.bgTertiary, borderRadius: 3, display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ fontWeight: 600 }}>→</span> Apply left → right</span>
+                  <span style={{ padding: '2px 6px', background: t.bgTertiary, borderRadius: 3 }}>L→R / R→L for objects</span>
+                </div>
+              </div>
+            )}
+
             <div style={{ background: t.bgSecondary, borderRadius: 8, border: `1px solid ${t.border}`, overflow: 'hidden' }}>
               <div style={{ display: 'flex', padding: '8px 10px', background: t.bgTertiary, borderBottom: `1px solid ${t.border}`, fontSize: 9, fontWeight: 600, color: t.textMuted }}>
                 <div style={{ width: 20 }} />
@@ -1162,11 +1396,11 @@ export default function JsonToolkit() {
           <>
             {/* Interactive hint banner */}
             <div style={{ background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(16, 185, 129, 0.1))', border: `1px solid ${t.border}`, borderRadius: 6, padding: '10px 14px', marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
-              <span style={{ fontSize: 11, color: t.text }}>✨ <strong>Interactive Editor</strong> — Double-click values or keys to edit. Hover for <span style={{ color: t.success }}>+</span> <span style={{ color: t.warning }}>✎</span> <span style={{ color: t.error }}>×</span> actions.</span>
+              <span style={{ fontSize: 11, color: t.text }}>✨ <strong>Interactive Editor</strong> — Double-click to edit. Click <span style={{ color: t.success, fontWeight: 600 }}>+</span> to add (choose type).</span>
               <div style={{ display: 'flex', gap: 6, fontSize: 9, color: t.textMuted }}>
-                <span style={{ padding: '2px 6px', background: t.bgTertiary, borderRadius: 3 }}>Double-click = Edit</span>
-                <span style={{ padding: '2px 6px', background: t.bgTertiary, borderRadius: 3 }}>Enter = Save</span>
-                <span style={{ padding: '2px 6px', background: t.bgTertiary, borderRadius: 3 }}>Esc = Cancel</span>
+                <span style={{ padding: '2px 6px', background: t.bgTertiary, borderRadius: 3 }}>Dbl-click = Edit</span>
+                <span style={{ padding: '2px 6px', background: t.bgTertiary, borderRadius: 3 }}><span style={{ color: t.success }}>+</span> = Add (string/number/object/array...)</span>
+                <span style={{ padding: '2px 6px', background: t.bgTertiary, borderRadius: 3 }}><span style={{ color: t.error }}>×</span> = Delete</span>
               </div>
             </div>
             <div style={{ marginBottom: 14 }}>
@@ -1481,7 +1715,7 @@ export default function JsonToolkit() {
 
         {/* Features */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 8, marginTop: 20 }}>
-          {[{ i: '🔄', t: 'JSON↔YAML', d: 'Convert formats' }, { i: '🌳', t: 'Tree Diff', d: 'Visual compare' }, { i: '✏️', t: 'Editor', d: 'Edit in tree' }, { i: '✅', t: 'Validate', d: 'Check syntax' }, { i: '🔐', t: 'JWT', d: 'Decode tokens' }, { i: '🌓', t: 'Themes', d: 'Dark & light' }].map((f, i) => (
+          {[{ i: '🔄', t: 'JSON↔YAML', d: 'Convert formats' }, { i: '⇄', t: 'Diff+Revert', d: 'Compare & sync' }, { i: '✏️', t: 'Editor', d: 'Edit in tree' }, { i: '✅', t: 'Validate', d: 'Check syntax' }, { i: '🔐', t: 'JWT', d: 'Decode tokens' }, { i: '🌓', t: 'Themes', d: 'Dark & light' }].map((f, i) => (
             <div key={i} style={{ padding: 10, background: t.bgSecondary, borderRadius: 6, border: `1px solid ${t.border}` }}>
               <div style={{ fontSize: 16, marginBottom: 4 }}>{f.i}</div>
               <h3 style={{ margin: 0, fontSize: 10, fontWeight: 600, color: t.text }}>{f.t}</h3>
