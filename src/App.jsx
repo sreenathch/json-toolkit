@@ -406,7 +406,12 @@ export default function JsonToolkit() {
   const [converterInput, setConverterInput] = useState('');
   const [converterOutput, setConverterOutput] = useState('');
   const [outputFormat, setOutputFormat] = useState('yaml');
-  const [activeTab, setActiveTab] = useState('diff');
+  const [activeTab, setActiveTab] = useState(() => {
+    // Initialize from URL hash
+    const hash = window.location.hash.replace('#', '');
+    const validTabs = ['diff', 'converter', 'visualizer', 'validate', 'jwt'];
+    return validTabs.includes(hash) ? hash : 'diff';
+  });
   const [expandedNodes, setExpandedNodes] = useState(new Set(['$']));
   const [searchTerm, setSearchTerm] = useState('');
   const [showOnlyDiffs, setShowOnlyDiffs] = useState(false);
@@ -419,7 +424,6 @@ export default function JsonToolkit() {
   const [editingKeyPath, setEditingKeyPath] = useState(null);
   const [editingKeyValue, setEditingKeyValue] = useState('');
   const [addMenuPath, setAddMenuPath] = useState(null);
-  const [diffHover, setDiffHover] = useState(null);
   
   // JWT State
   const [jwtInput, setJwtInput] = useState('');
@@ -464,6 +468,25 @@ export default function JsonToolkit() {
       return () => document.removeEventListener('click', handleClickOutside);
     }
   }, [addMenuPath]);
+
+  // URL hash-based routing
+  useEffect(() => {
+    // Update URL when tab changes
+    window.location.hash = activeTab;
+  }, [activeTab]);
+
+  useEffect(() => {
+    // Listen for hash changes (browser back/forward)
+    const handleHashChange = () => {
+      const hash = window.location.hash.replace('#', '');
+      const validTabs = ['diff', 'converter', 'visualizer', 'validate', 'jwt'];
+      if (validTabs.includes(hash)) {
+        setActiveTab(hash);
+      }
+    };
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
 
   const getType = (v) => v === null ? 'null' : Array.isArray(v) ? 'array' : typeof v;
 
@@ -899,19 +922,20 @@ export default function JsonToolkit() {
   };
 
   const Badge = ({ format }) => (
-    <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, fontWeight: 600, textTransform: 'uppercase', background: format === 'yaml' ? 'rgba(250, 204, 21, 0.15)' : 'rgba(96, 165, 250, 0.15)', color: format === 'yaml' ? '#facc15' : '#60a5fa', border: `1px solid ${format === 'yaml' ? 'rgba(250, 204, 21, 0.3)' : 'rgba(96, 165, 250, 0.3)'}` }}>
+    <span style={{ fontSize: 10, padding: '3px 8px', borderRadius: 4, fontWeight: 600, textTransform: 'uppercase', background: format === 'yaml' ? 'rgba(250, 204, 21, 0.15)' : 'rgba(96, 165, 250, 0.15)', color: format === 'yaml' ? '#facc15' : '#60a5fa', border: `1px solid ${format === 'yaml' ? 'rgba(250, 204, 21, 0.3)' : 'rgba(96, 165, 250, 0.3)'}` }}>
       {format}
     </span>
   );
 
   // Tree Node for Diff
   const DiffNode = ({ node, depth = 0 }) => {
+    const [isHovered, setIsHovered] = useState(false);
+    
     if (!node) return null;
     const exp = expandedNodes.has(node.path);
     const hasKids = node.children.length > 0;
     const cfg = statusCfg[node.status];
     const isLeaf = !hasKids || node.status === 'type_changed';
-    const isHovered = diffHover === node.path;
 
     if (searchTerm && !node.path.toLowerCase().includes(searchTerm.toLowerCase())) {
       const match = node.children.some(c => c.path.toLowerCase().includes(searchTerm.toLowerCase()));
@@ -919,67 +943,70 @@ export default function JsonToolkit() {
     }
     if (showOnlyDiffs && node.status === 'unchanged' && !node.children.some(c => c.status !== 'unchanged')) return null;
 
+    // Revert button style - consistent with other buttons
+    const revertBtnStyle = { padding: '4px 8px', background: t.bgTertiary, border: `1px solid ${t.border}`, borderRadius: 4, color: t.textSecondary, cursor: 'pointer', fontSize: 11, fontWeight: 500, whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', justifyContent: 'center', height: 24 };
+
     return (
-      <div style={{ marginLeft: depth > 0 ? 16 : 0 }}>
+      <div style={{ marginLeft: depth > 0 ? 18 : 0 }}>
         <div 
           onClick={() => hasKids && toggle(node.path, setExpandedNodes)} 
-          onMouseEnter={() => setDiffHover(node.path)}
-          onMouseLeave={() => setDiffHover(null)}
-          style={{ display: 'flex', alignItems: 'center', padding: '4px 0', cursor: hasKids ? 'pointer' : 'default', borderLeft: `3px solid ${cfg.border}`, marginBottom: 2, background: node.status !== 'unchanged' ? cfg.bg : 'transparent', borderRadius: '0 6px 6px 0' }}
+          onMouseEnter={() => setIsHovered(true)}
+          onMouseLeave={() => setIsHovered(false)}
+          style={{ display: 'flex', alignItems: 'center', padding: '5px 0', cursor: hasKids ? 'pointer' : 'default', borderLeft: `3px solid ${cfg.border}`, marginBottom: 3, background: node.status !== 'unchanged' ? cfg.bg : 'transparent', borderRadius: '0 6px 6px 0' }}
         >
-          <div style={{ width: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            {hasKids && <span style={{ transform: exp ? 'rotate(90deg)' : '', transition: 'transform 0.15s', color: t.textMuted }}>▶</span>}
+          <div style={{ width: 24, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            {hasKids && <span style={{ transform: exp ? 'rotate(90deg)' : '', transition: 'transform 0.15s', color: t.textMuted, fontSize: 11 }}>▶</span>}
           </div>
-          <div style={{ minWidth: 90, maxWidth: 160, paddingRight: 8, display: 'flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ fontFamily: 'monospace', fontSize: 11, color: node.status !== 'unchanged' ? t.text : t.textSecondary, fontWeight: node.status !== 'unchanged' ? 600 : 400 }}>{node.key}</span>
-            {node.status !== 'unchanged' && <span style={{ padding: '1px 4px', borderRadius: 3, fontSize: 8, fontWeight: 700, background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}` }}>{node.status === 'added' ? '+' : node.status === 'removed' ? '−' : node.status === 'modified' ? '~' : '⇄'}</span>}
+          <div style={{ minWidth: 100, maxWidth: 180, paddingRight: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontFamily: 'monospace', fontSize: 12, color: node.status !== 'unchanged' ? t.text : t.textSecondary, fontWeight: node.status !== 'unchanged' ? 600 : 400 }}>{node.key}</span>
+            {node.status !== 'unchanged' && <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 700, background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}` }}>{node.status === 'added' ? '+' : node.status === 'removed' ? '−' : node.status === 'modified' ? '~' : '⇄'}</span>}
           </div>
           {isLeaf && (
-            <div style={{ display: 'flex', flex: 1, gap: 4, alignItems: 'center', paddingRight: 8 }}>
+            <div style={{ display: 'flex', flex: 1, gap: 6, alignItems: 'center', paddingRight: 10 }}>
               {/* Left value with revert button */}
-              <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 4 }}>
-                <div style={{ flex: 1, padding: '2px 6px', borderRadius: 4, fontFamily: 'monospace', fontSize: 10, background: ['removed', 'modified', 'type_changed'].includes(node.status) ? t.errorLight : t.bgTertiary }}>{fmtVal(node.lv, node.lt)}</div>
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div style={{ flex: 1, padding: '4px 8px', borderRadius: 5, fontFamily: 'monospace', fontSize: 11, background: ['removed', 'modified', 'type_changed'].includes(node.status) ? t.errorLight : t.bgTertiary }}>{fmtVal(node.lv, node.lt)}</div>
                 {isHovered && node.status !== 'unchanged' && (
                   <button 
                     onClick={e => { e.stopPropagation(); revertToLeft(node); }} 
-                    style={{ padding: '2px 4px', background: t.bgTertiary, border: `1px solid ${t.border}`, borderRadius: 3, color: t.textSecondary, cursor: 'pointer', fontSize: 8, whiteSpace: 'nowrap' }}
+                    style={revertBtnStyle}
                     title="Apply left value to right"
                   >
                     →
                   </button>
                 )}
               </div>
-              <span style={{ color: t.textDim, fontSize: 10 }}>⟷</span>
+              <span style={{ color: t.textDim, fontSize: 12 }}>⟷</span>
               {/* Right value with revert button */}
-              <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 4 }}>
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6 }}>
                 {isHovered && node.status !== 'unchanged' && (
                   <button 
                     onClick={e => { e.stopPropagation(); revertToRight(node); }} 
-                    style={{ padding: '2px 4px', background: t.bgTertiary, border: `1px solid ${t.border}`, borderRadius: 3, color: t.textSecondary, cursor: 'pointer', fontSize: 8, whiteSpace: 'nowrap' }}
+                    style={revertBtnStyle}
                     title="Apply right value to left"
                   >
                     ←
                   </button>
                 )}
-                <div style={{ flex: 1, padding: '2px 6px', borderRadius: 4, fontFamily: 'monospace', fontSize: 10, background: ['added', 'modified', 'type_changed'].includes(node.status) ? t.successLight : t.bgTertiary }}>{fmtVal(node.rv, node.rt)}</div>
+                <div style={{ flex: 1, padding: '4px 8px', borderRadius: 5, fontFamily: 'monospace', fontSize: 11, background: ['added', 'modified', 'type_changed'].includes(node.status) ? t.successLight : t.bgTertiary }}>{fmtVal(node.rv, node.rt)}</div>
               </div>
             </div>
           )}
           {!isLeaf && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ color: t.textMuted, fontSize: 10, fontFamily: 'monospace' }}>{node.lt === 'array' ? `[${node.lv?.length || 0}]` : `{${Object.keys(node.lv || {}).length}}`}{node.status === 'modified' && <span style={{ color: t.warning, marginLeft: 4 }}>•</span>}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ color: t.textMuted, fontSize: 11, fontFamily: 'monospace' }}>{node.lt === 'array' ? `[${node.lv?.length || 0}]` : `{${Object.keys(node.lv || {}).length}}`}{node.status === 'modified' && <span style={{ color: t.warning, marginLeft: 4 }}>•</span>}</span>
               {isHovered && node.status !== 'unchanged' && (
-                <div style={{ display: 'flex', gap: 2 }}>
+                <div style={{ display: 'flex', gap: 4 }}>
                   <button 
                     onClick={e => { e.stopPropagation(); revertToLeft(node); }} 
-                    style={{ padding: '2px 5px', background: t.bgTertiary, border: `1px solid ${t.border}`, borderRadius: 3, color: t.textSecondary, cursor: 'pointer', fontSize: 8 }}
+                    style={revertBtnStyle}
                     title="Apply left to right"
                   >
                     L→R
                   </button>
                   <button 
                     onClick={e => { e.stopPropagation(); revertToRight(node); }} 
-                    style={{ padding: '2px 5px', background: t.bgTertiary, border: `1px solid ${t.border}`, borderRadius: 3, color: t.textSecondary, cursor: 'pointer', fontSize: 8 }}
+                    style={revertBtnStyle}
                     title="Apply right to left"
                   >
                     R→L
@@ -989,7 +1016,7 @@ export default function JsonToolkit() {
             </div>
           )}
         </div>
-        {hasKids && exp && <div style={{ borderLeft: `1px solid ${t.border}`, marginLeft: 9 }}>{node.children.map(c => <DiffNode key={c.path} node={c} depth={depth + 1} />)}</div>}
+        {hasKids && exp && <div style={{ borderLeft: `1px solid ${t.border}`, marginLeft: 11 }}>{node.children.map(c => <DiffNode key={c.path} node={c} depth={depth + 1} />)}</div>}
       </div>
     );
   };
@@ -1226,60 +1253,65 @@ export default function JsonToolkit() {
   // Input Panel
   const InputPanel = ({ side, label, color, value, setter, parsed, height = 180 }) => (
     <div style={{ background: t.bgSecondary, borderRadius: 10, border: `1px solid ${!parsed.valid && value ? t.error + '60' : t.border}`, overflow: 'hidden' }}>
-      <div style={{ padding: '8px 12px', background: t.bgTertiary, borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <div style={{ width: 6, height: 6, borderRadius: '50%', background: color, boxShadow: `0 0 6px ${color}` }} />
-          <span style={{ fontSize: 11, fontWeight: 600, color: t.text }}>{label}</span>
+      <div style={{ padding: '10px 14px', background: t.bgTertiary, borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ width: 8, height: 8, borderRadius: '50%', background: color, boxShadow: `0 0 6px ${color}` }} />
+          <span style={{ fontSize: 13, fontWeight: 600, color: t.text }}>{label}</span>
           {parsed.valid && value && parsed.format !== 'unknown' && <Badge format={parsed.format} />}
-          {parsed.valid && value && <span style={{ fontSize: 9, color: t.success, background: t.successLight, padding: '1px 5px', borderRadius: 3 }}>✓</span>}
-          {parsed.wasFixed && <span style={{ fontSize: 9, color: t.warning, background: t.warningLight, padding: '1px 5px', borderRadius: 3 }}>Fixed</span>}
+          {parsed.valid && value && <span style={{ fontSize: 10, color: t.success, background: t.successLight, padding: '2px 8px', borderRadius: 4 }}>✓</span>}
+          {parsed.wasFixed && <span style={{ fontSize: 10, color: t.warning, background: t.warningLight, padding: '2px 8px', borderRadius: 4 }}>Fixed</span>}
         </div>
-        <div style={{ display: 'flex', gap: 3 }}>
-          <button onClick={() => format(side)} style={{ padding: '3px 6px', background: t.bgHover, border: 'none', borderRadius: 3, color: t.textSecondary, cursor: 'pointer', fontSize: 9 }}>Format</button>
-          <button onClick={() => minify(side)} style={{ padding: '3px 6px', background: t.bgHover, border: 'none', borderRadius: 3, color: t.textSecondary, cursor: 'pointer', fontSize: 9 }}>Minify</button>
-          <button onClick={() => toJsonFmt(side)} style={{ padding: '3px 6px', background: 'rgba(96, 165, 250, 0.1)', border: 'none', borderRadius: 3, color: '#60a5fa', cursor: 'pointer', fontSize: 9 }}>→JSON</button>
-          <button onClick={() => toYamlFmt(side)} style={{ padding: '3px 6px', background: 'rgba(250, 204, 21, 0.1)', border: 'none', borderRadius: 3, color: '#facc15', cursor: 'pointer', fontSize: 9 }}>→YAML</button>
-          <button onClick={() => sortKeys(side)} style={{ padding: '3px 6px', background: t.bgHover, border: 'none', borderRadius: 3, color: t.textSecondary, cursor: 'pointer', fontSize: 9 }}>Sort</button>
-          <button onClick={() => copy(value, side)} style={{ padding: '3px 6px', background: t.bgHover, border: 'none', borderRadius: 3, color: copied === side ? t.success : t.textSecondary, cursor: 'pointer', fontSize: 9 }}>{copied === side ? '✓' : 'Copy'}</button>
+        <div style={{ display: 'flex', gap: 4 }}>
+          <button onClick={() => format(side)} style={{ padding: '4px 10px', background: t.bgHover, border: 'none', borderRadius: 4, color: t.textSecondary, cursor: 'pointer', fontSize: 11, height: 26, display: 'flex', alignItems: 'center' }}>Format</button>
+          <button onClick={() => minify(side)} style={{ padding: '4px 10px', background: t.bgHover, border: 'none', borderRadius: 4, color: t.textSecondary, cursor: 'pointer', fontSize: 11, height: 26, display: 'flex', alignItems: 'center' }}>Minify</button>
+          <button onClick={() => toJsonFmt(side)} style={{ padding: '4px 10px', background: 'rgba(96, 165, 250, 0.1)', border: 'none', borderRadius: 4, color: '#60a5fa', cursor: 'pointer', fontSize: 11, height: 26, display: 'flex', alignItems: 'center' }}>→JSON</button>
+          <button onClick={() => toYamlFmt(side)} style={{ padding: '4px 10px', background: 'rgba(250, 204, 21, 0.1)', border: 'none', borderRadius: 4, color: '#facc15', cursor: 'pointer', fontSize: 11, height: 26, display: 'flex', alignItems: 'center' }}>→YAML</button>
+          <button onClick={() => sortKeys(side)} style={{ padding: '4px 10px', background: t.bgHover, border: 'none', borderRadius: 4, color: t.textSecondary, cursor: 'pointer', fontSize: 11, height: 26, display: 'flex', alignItems: 'center' }}>Sort</button>
+          <button onClick={() => copy(value, side)} style={{ padding: '4px 10px', background: t.bgHover, border: 'none', borderRadius: 4, color: copied === side ? t.success : t.textSecondary, cursor: 'pointer', fontSize: 11, height: 26, display: 'flex', alignItems: 'center' }}>{copied === side ? '✓' : 'Copy'}</button>
         </div>
       </div>
-      <textarea value={value} onChange={e => setter(e.target.value)} placeholder="Paste JSON or YAML here..." style={{ width: '100%', height, padding: 10, background: 'transparent', border: 'none', color: t.text, fontSize: 11, fontFamily: 'monospace', lineHeight: 1.5, resize: 'none', outline: 'none' }} spellCheck={false} />
-      {!parsed.valid && value && <div style={{ padding: '8px 12px', background: t.errorLight, borderTop: `1px solid ${t.error}30`, color: t.error, fontSize: 10 }}>⚠ {parsed.line && `Line ${parsed.line}: `}{parsed.error}</div>}
+      <textarea value={value} onChange={e => setter(e.target.value)} placeholder="Paste JSON or YAML here..." style={{ width: '100%', height, padding: 12, background: 'transparent', border: 'none', color: t.text, fontSize: 12, fontFamily: 'monospace', lineHeight: 1.5, resize: 'none', outline: 'none' }} spellCheck={false} />
+      {!parsed.valid && value && <div style={{ padding: '10px 14px', background: t.errorLight, borderTop: `1px solid ${t.error}30`, color: t.error, fontSize: 12 }}>⚠ {parsed.line && `Line ${parsed.line}: `}{parsed.error}</div>}
     </div>
   );
 
   const Btn = ({ children, onClick, active, color }) => (
-    <button onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 10px', background: active ? t.accentLight : 'transparent', border: 'none', borderRadius: 5, color: active ? t.accent : color || t.textMuted, cursor: 'pointer', fontSize: 10, fontWeight: 500 }}>{children}</button>
+    <button onClick={onClick} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '12px 20px', background: active ? t.accentLight : 'transparent', border: active ? `2px solid ${t.accent}60` : '2px solid transparent', borderRadius: 10, color: active ? t.accent : color || t.textMuted, cursor: 'pointer', fontSize: 14, fontWeight: 600, transition: 'all 0.2s', minWidth: 90 }}>{children}</button>
   );
+
+  // Common button style for all screens (30% larger)
+  const btnStyle = { padding: '8px 14px', background: t.bgSecondary, border: `1px solid ${t.border}`, borderRadius: 6, color: t.textSecondary, cursor: 'pointer', fontSize: 13, fontWeight: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', height: 32, gap: 6 };
+  const btnStyleAccent = { ...btnStyle, background: t.accentLight, border: `1px solid ${t.accent}40`, color: t.accent };
+  const btnStylePrimary = { ...btnStyle, padding: '10px 18px', background: `linear-gradient(135deg, ${t.accent}, #10b981)`, border: 'none', color: 'white', fontWeight: 600, height: 36 };
 
   return (
     <div style={{ minHeight: '100vh', background: t.bg, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", color: t.text }}>
       <style>{`*{box-sizing:border-box}::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:${t.bgTertiary}}::-webkit-scrollbar-thumb{background:${t.textDim};border-radius:3px}textarea::placeholder{color:${t.textDim}}`}</style>
 
-      {/* Header */}
-      <header style={{ position: 'sticky', top: 0, zIndex: 50, padding: '10px 20px', background: t.name === 'dark' ? 'rgba(10, 10, 15, 0.95)' : 'rgba(248, 250, 252, 0.95)', backdropFilter: 'blur(12px)', borderBottom: `1px solid ${t.border}` }}>
-        <div style={{ maxWidth: 1400, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ width: 32, height: 32, borderRadius: 8, background: 'linear-gradient(135deg, #6366f1, #10b981)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>⚡</div>
+      {/* Header - Larger and more visible */}
+      <header style={{ position: 'sticky', top: 0, zIndex: 50, padding: '16px 24px', background: t.name === 'dark' ? 'rgba(10, 10, 15, 0.98)' : 'rgba(248, 250, 252, 0.98)', backdropFilter: 'blur(12px)', borderBottom: `2px solid ${t.border}`, boxShadow: t.name === 'dark' ? '0 4px 24px rgba(0,0,0,0.4)' : '0 4px 24px rgba(0,0,0,0.12)' }}>
+        <div style={{ maxWidth: 1400, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 20, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <div style={{ width: 46, height: 46, borderRadius: 12, background: 'linear-gradient(135deg, #6366f1, #10b981)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, boxShadow: '0 4px 12px rgba(99, 102, 241, 0.3)' }}>⚡</div>
             <div>
-              <h1 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: t.text }}>JSON/YAML Toolkit</h1>
-              <p style={{ margin: 0, fontSize: 9, color: t.textMuted }}>Diff • Convert • Visualize • Validate • JWT</p>
+              <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: t.text }}>JSON/YAML Toolkit</h1>
+              <p style={{ margin: 0, fontSize: 12, color: t.textMuted }}>Diff • Convert • Edit • Validate • JWT</p>
             </div>
           </div>
 
-          {/* Tabs */}
-          <div style={{ display: 'flex', gap: 2, background: t.bgTertiary, padding: 3, borderRadius: 6 }}>
-            {[{ id: 'diff', label: 'Diff' }, { id: 'converter', label: 'Convert' }, { id: 'visualizer', label: 'Visualize' }, { id: 'validate', label: 'Validate' }, { id: 'jwt', label: '🔐 JWT' }].map(tab => (
+          {/* Tabs - Large and prominent navigation */}
+          <nav style={{ display: 'flex', gap: 6, background: t.bgTertiary, padding: 6, borderRadius: 12, border: `2px solid ${t.border}`, boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.1)' }}>
+            {[{ id: 'diff', label: '⇄ Diff' }, { id: 'converter', label: '🔄 Convert' }, { id: 'visualizer', label: '✏️ Editor' }, { id: 'validate', label: '✅ Validate' }, { id: 'jwt', label: '🔐 JWT' }].map(tab => (
               <Btn key={tab.id} onClick={() => setActiveTab(tab.id)} active={activeTab === tab.id}>{tab.label}</Btn>
             ))}
-          </div>
+          </nav>
 
-          {/* Actions */}
-          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-            <button onClick={loadSample} style={{ padding: '5px 10px', background: t.bgSecondary, border: `1px solid ${t.border}`, borderRadius: 5, color: t.textSecondary, cursor: 'pointer', fontSize: 10 }}>Sample</button>
-            <button onClick={clear} style={{ padding: '5px 10px', background: t.bgSecondary, border: `1px solid ${t.border}`, borderRadius: 5, color: t.textSecondary, cursor: 'pointer', fontSize: 10 }}>Clear</button>
-            {activeTab === 'diff' && <button onClick={swap} style={{ padding: '5px 10px', background: t.bgSecondary, border: `1px solid ${t.border}`, borderRadius: 5, color: t.textSecondary, cursor: 'pointer', fontSize: 10 }}>⇄ Swap</button>}
-            <button onClick={() => setTheme(th => th === 'dark' ? 'light' : 'dark')} style={{ padding: '5px 10px', background: t.bgSecondary, border: `1px solid ${t.border}`, borderRadius: 5, color: t.textSecondary, cursor: 'pointer', fontSize: 10 }}>{t.name === 'dark' ? '☀️' : '🌙'}</button>
+          {/* Actions - Larger buttons */}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button onClick={loadSample} style={btnStyle}>📄 Sample</button>
+            <button onClick={clear} style={btnStyle}>🗑️ Clear</button>
+            {activeTab === 'diff' && <button onClick={swap} style={btnStyle}>⇄ Swap</button>}
+            <button onClick={() => setTheme(th => th === 'dark' ? 'light' : 'dark')} style={btnStyle}>{t.name === 'dark' ? '☀️ Light' : '🌙 Dark'}</button>
           </div>
         </div>
       </header>
@@ -1294,69 +1326,69 @@ export default function JsonToolkit() {
             </div>
 
             {diffTree && stats && (stats.added > 0 || stats.removed > 0 || stats.modified > 0) && (
-              <div style={{ display: 'flex', gap: 10, padding: '10px 14px', background: t.accentLight, borderRadius: 8, marginBottom: 12, alignItems: 'center', border: `1px solid ${t.accent}20` }}>
-                <span style={{ fontSize: 22, fontWeight: 800, color: t.accent }}>{stats.added + stats.removed + stats.modified + stats.type_changed}</span>
-                <span style={{ color: t.textMuted, fontSize: 11 }}>changes</span>
-                <div style={{ width: 1, height: 20, background: t.border, margin: '0 8px' }} />
+              <div style={{ display: 'flex', gap: 14, padding: '12px 18px', background: t.accentLight, borderRadius: 10, marginBottom: 14, alignItems: 'center', border: `1px solid ${t.accent}20` }}>
+                <span style={{ fontSize: 26, fontWeight: 800, color: t.accent }}>{stats.added + stats.removed + stats.modified + stats.type_changed}</span>
+                <span style={{ color: t.textMuted, fontSize: 13 }}>changes</span>
+                <div style={{ width: 1, height: 24, background: t.border, margin: '0 10px' }} />
                 {[{ n: stats.added, c: t.success, l: 'Added' }, { n: stats.removed, c: t.error, l: 'Removed' }, { n: stats.modified, c: t.warning, l: 'Changed' }].filter(x => x.n > 0).map(x => (
-                  <div key={x.l} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <div style={{ width: 6, height: 6, borderRadius: 2, background: x.c }} />
-                    <span style={{ color: x.c, fontWeight: 700, fontSize: 12 }}>{x.n}</span>
-                    <span style={{ color: t.textMuted, fontSize: 10 }}>{x.l}</span>
+                  <div key={x.l} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div style={{ width: 8, height: 8, borderRadius: 2, background: x.c }} />
+                    <span style={{ color: x.c, fontWeight: 700, fontSize: 14 }}>{x.n}</span>
+                    <span style={{ color: t.textMuted, fontSize: 12 }}>{x.l}</span>
                   </div>
                 ))}
               </div>
             )}
 
             {diffTree && (
-              <div style={{ display: 'flex', gap: 6, marginBottom: 10, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
-                <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                  <button onClick={expandAll} style={{ padding: '4px 8px', background: t.bgSecondary, border: `1px solid ${t.border}`, borderRadius: 4, color: t.textSecondary, cursor: 'pointer', fontSize: 9 }}>Expand All</button>
-                  <button onClick={expandDiffs} style={{ padding: '4px 8px', background: t.accentLight, border: `1px solid ${t.accent}30`, borderRadius: 4, color: t.accent, cursor: 'pointer', fontSize: 9 }}>Expand Changes</button>
-                  <button onClick={() => setExpandedNodes(new Set(['$']))} style={{ padding: '4px 8px', background: t.bgSecondary, border: `1px solid ${t.border}`, borderRadius: 4, color: t.textSecondary, cursor: 'pointer', fontSize: 9 }}>Collapse</button>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 8, cursor: 'pointer' }}>
-                    <input type="checkbox" checked={showOnlyDiffs} onChange={e => setShowOnlyDiffs(e.target.checked)} style={{ accentColor: t.accent }} />
-                    <span style={{ fontSize: 9, color: t.textSecondary }}>Only changes</span>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 14, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <button onClick={expandAll} style={btnStyle}>Expand All</button>
+                  <button onClick={expandDiffs} style={btnStyleAccent}>Expand Changes</button>
+                  <button onClick={() => setExpandedNodes(new Set(['$']))} style={btnStyle}>Collapse</button>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 10, cursor: 'pointer' }}>
+                    <input type="checkbox" checked={showOnlyDiffs} onChange={e => setShowOnlyDiffs(e.target.checked)} style={{ accentColor: t.accent, width: 18, height: 18 }} />
+                    <span style={{ fontSize: 13, color: t.textSecondary }}>Only changes</span>
                   </label>
                 </div>
-                <input type="text" placeholder="Search..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} style={{ padding: '4px 8px', background: t.bgSecondary, border: `1px solid ${t.border}`, borderRadius: 4, color: t.text, fontSize: 9, width: 120, outline: 'none' }} />
+                <input type="text" placeholder="🔍 Search..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} style={{ padding: '8px 14px', background: t.bgSecondary, border: `1px solid ${t.border}`, borderRadius: 6, color: t.text, fontSize: 13, width: 160, outline: 'none' }} />
               </div>
             )}
 
             {/* Revert hint banner */}
             {diffTree && (stats.added > 0 || stats.removed > 0 || stats.modified > 0) && (
-              <div style={{ background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.05), rgba(34, 197, 94, 0.05))', border: `1px solid ${t.border}`, borderRadius: 6, padding: '8px 14px', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 10, color: t.text }}>🔄 <strong>Revert Changes</strong> — Hover over differences to sync values:</span>
-                <div style={{ display: 'flex', gap: 8, fontSize: 9, color: t.textMuted }}>
-                  <span style={{ padding: '2px 6px', background: t.bgTertiary, borderRadius: 3, display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ fontWeight: 600 }}>←</span> Apply right → left</span>
-                  <span style={{ padding: '2px 6px', background: t.bgTertiary, borderRadius: 3, display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ fontWeight: 600 }}>→</span> Apply left → right</span>
-                  <span style={{ padding: '2px 6px', background: t.bgTertiary, borderRadius: 3 }}>L→R / R→L for objects</span>
+              <div style={{ background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.05), rgba(34, 197, 94, 0.05))', border: `1px solid ${t.border}`, borderRadius: 8, padding: '10px 16px', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 12, color: t.text }}>🔄 <strong>Revert Changes</strong> — Hover over differences to sync values:</span>
+                <div style={{ display: 'flex', gap: 10, fontSize: 11, color: t.textMuted }}>
+                  <span style={{ padding: '4px 10px', background: t.bgTertiary, borderRadius: 4, display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ fontWeight: 600 }}>←</span> Apply right → left</span>
+                  <span style={{ padding: '4px 10px', background: t.bgTertiary, borderRadius: 4, display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ fontWeight: 600 }}>→</span> Apply left → right</span>
+                  <span style={{ padding: '4px 10px', background: t.bgTertiary, borderRadius: 4 }}>L→R / R→L for objects</span>
                 </div>
               </div>
             )}
 
-            <div style={{ background: t.bgSecondary, borderRadius: 8, border: `1px solid ${t.border}`, overflow: 'hidden' }}>
-              <div style={{ display: 'flex', padding: '8px 10px', background: t.bgTertiary, borderBottom: `1px solid ${t.border}`, fontSize: 9, fontWeight: 600, color: t.textMuted }}>
-                <div style={{ width: 20 }} />
-                <div style={{ minWidth: 90, maxWidth: 160, paddingRight: 8 }}>Key</div>
-                <div style={{ flex: 1, display: 'flex', gap: 8 }}>
-                  <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 4 }}><div style={{ width: 4, height: 4, borderRadius: 1, background: t.error }} />Left</div>
-                  <div style={{ width: 16 }} />
-                  <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 4 }}><div style={{ width: 4, height: 4, borderRadius: 1, background: t.success }} />Right</div>
+            <div style={{ background: t.bgSecondary, borderRadius: 10, border: `1px solid ${t.border}`, overflow: 'hidden' }}>
+              <div style={{ display: 'flex', padding: '10px 14px', background: t.bgTertiary, borderBottom: `1px solid ${t.border}`, fontSize: 12, fontWeight: 600, color: t.textMuted }}>
+                <div style={{ width: 24 }} />
+                <div style={{ minWidth: 100, maxWidth: 180, paddingRight: 10 }}>Key</div>
+                <div style={{ flex: 1, display: 'flex', gap: 10 }}>
+                  <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6 }}><div style={{ width: 6, height: 6, borderRadius: 2, background: t.error }} />Left</div>
+                  <div style={{ width: 20 }} />
+                  <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6 }}><div style={{ width: 6, height: 6, borderRadius: 2, background: t.success }} />Right</div>
                 </div>
               </div>
-              <div style={{ padding: 8, maxHeight: 400, overflow: 'auto' }}>
+              <div style={{ padding: 10, maxHeight: 420, overflow: 'auto' }}>
                 {!leftParsed.data && !rightParsed.data ? (
-                  <div style={{ textAlign: 'center', padding: 40, color: t.textMuted }}>
-                    <p style={{ fontSize: 12, fontWeight: 500, color: t.text, marginBottom: 4 }}>Ready to Compare</p>
-                    <p style={{ fontSize: 10, marginBottom: 12 }}>Paste JSON or YAML in both panels</p>
-                    <button onClick={loadSample} style={{ padding: '8px 14px', background: `linear-gradient(135deg, ${t.accent}, #10b981)`, border: 'none', borderRadius: 5, color: 'white', cursor: 'pointer', fontSize: 10, fontWeight: 600 }}>Try Sample</button>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: 40, color: t.textMuted }}>
+                    <p style={{ fontSize: 14, fontWeight: 500, color: t.text, marginBottom: 6 }}>Ready to Compare</p>
+                    <p style={{ fontSize: 12, marginBottom: 16 }}>Paste JSON or YAML in both panels</p>
+                    <button onClick={loadSample} style={{ ...btnStylePrimary, display: 'inline-flex' }}>📄 Try Sample</button>
                   </div>
                 ) : diffTree && !stats.added && !stats.removed && !stats.modified && !stats.type_changed ? (
-                  <div style={{ textAlign: 'center', padding: 40 }}>
-                    <div style={{ fontSize: 32, marginBottom: 8 }}>✅</div>
-                    <p style={{ fontSize: 14, fontWeight: 600, color: t.success }}>Identical!</p>
-                    <p style={{ fontSize: 10, color: t.textMuted }}>Both objects match</p>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: 40 }}>
+                    <div style={{ fontSize: 40, marginBottom: 12 }}>✅</div>
+                    <p style={{ fontSize: 16, fontWeight: 600, color: t.success }}>Identical!</p>
+                    <p style={{ fontSize: 12, color: t.textMuted }}>Both objects match</p>
                   </div>
                 ) : diffTree ? <DiffNode node={diffTree} /> : null}
               </div>
@@ -1367,25 +1399,25 @@ export default function JsonToolkit() {
         {/* CONVERTER TAB */}
         {activeTab === 'converter' && (
           <>
-            <div style={{ background: 'linear-gradient(135deg, rgba(96, 165, 250, 0.1), rgba(250, 204, 21, 0.1))', border: `1px solid ${t.border}`, borderRadius: 6, padding: '10px 14px', marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: 11, color: t.text }}>🔄 Convert between <span style={{ color: '#60a5fa', fontWeight: 600 }}>JSON</span> and <span style={{ color: '#facc15', fontWeight: 600 }}>YAML</span></span>
-              <div style={{ display: 'flex', gap: 4 }}>
-                <button onClick={() => setOutputFormat('json')} style={{ padding: '5px 10px', background: outputFormat === 'json' ? 'rgba(96, 165, 250, 0.2)' : t.bgTertiary, border: `1px solid ${outputFormat === 'json' ? 'rgba(96, 165, 250, 0.4)' : t.border}`, borderRadius: 5, color: outputFormat === 'json' ? '#60a5fa' : t.textMuted, cursor: 'pointer', fontSize: 10, fontWeight: 600 }}>→ JSON</button>
-                <button onClick={() => setOutputFormat('yaml')} style={{ padding: '5px 10px', background: outputFormat === 'yaml' ? 'rgba(250, 204, 21, 0.2)' : t.bgTertiary, border: `1px solid ${outputFormat === 'yaml' ? 'rgba(250, 204, 21, 0.4)' : t.border}`, borderRadius: 5, color: outputFormat === 'yaml' ? '#facc15' : t.textMuted, cursor: 'pointer', fontSize: 10, fontWeight: 600 }}>→ YAML</button>
+            <div style={{ background: 'linear-gradient(135deg, rgba(96, 165, 250, 0.1), rgba(250, 204, 21, 0.1))', border: `1px solid ${t.border}`, borderRadius: 8, padding: '12px 16px', marginBottom: 14, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 13, color: t.text }}>🔄 Convert between <span style={{ color: '#60a5fa', fontWeight: 600 }}>JSON</span> and <span style={{ color: '#facc15', fontWeight: 600 }}>YAML</span></span>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button onClick={() => setOutputFormat('json')} style={{ padding: '8px 14px', background: outputFormat === 'json' ? 'rgba(96, 165, 250, 0.2)' : t.bgTertiary, border: `2px solid ${outputFormat === 'json' ? 'rgba(96, 165, 250, 0.5)' : t.border}`, borderRadius: 6, color: outputFormat === 'json' ? '#60a5fa' : t.textMuted, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>→ JSON</button>
+                <button onClick={() => setOutputFormat('yaml')} style={{ padding: '8px 14px', background: outputFormat === 'yaml' ? 'rgba(250, 204, 21, 0.2)' : t.bgTertiary, border: `2px solid ${outputFormat === 'yaml' ? 'rgba(250, 204, 21, 0.5)' : t.border}`, borderRadius: 6, color: outputFormat === 'yaml' ? '#facc15' : t.textMuted, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>→ YAML</button>
               </div>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <InputPanel side="conv" label="Input (JSON or YAML)" color={t.accent} value={converterInput} setter={setConverterInput} parsed={convParsed} height={300} />
               <div style={{ background: t.bgSecondary, borderRadius: 10, border: `1px solid ${t.border}`, overflow: 'hidden' }}>
-                <div style={{ padding: '8px 12px', background: t.bgTertiary, borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <div style={{ width: 6, height: 6, borderRadius: '50%', background: outputFormat === 'yaml' ? '#facc15' : '#60a5fa' }} />
-                    <span style={{ fontSize: 11, fontWeight: 600, color: t.text }}>Output</span>
+                <div style={{ padding: '10px 14px', background: t.bgTertiary, borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: outputFormat === 'yaml' ? '#facc15' : '#60a5fa' }} />
+                    <span style={{ fontSize: 13, fontWeight: 600, color: t.text }}>Output</span>
                     <Badge format={outputFormat} />
                   </div>
-                  <button onClick={() => copy(converterOutput, 'out')} style={{ padding: '3px 6px', background: t.bgHover, border: 'none', borderRadius: 3, color: copied === 'out' ? t.success : t.textSecondary, cursor: 'pointer', fontSize: 9 }}>{copied === 'out' ? '✓' : 'Copy'}</button>
+                  <button onClick={() => copy(converterOutput, 'out')} style={{ ...btnStyle, height: 28 }}>{copied === 'out' ? '✓ Copied' : '📋 Copy'}</button>
                 </div>
-                <textarea value={converterOutput} readOnly placeholder="Converted output..." style={{ width: '100%', height: 300, padding: 10, background: 'transparent', border: 'none', color: t.text, fontSize: 11, fontFamily: 'monospace', lineHeight: 1.5, resize: 'none', outline: 'none' }} />
+                <textarea value={converterOutput} readOnly placeholder="Converted output..." style={{ width: '100%', height: 300, padding: 12, background: 'transparent', border: 'none', color: t.text, fontSize: 12, fontFamily: 'monospace', lineHeight: 1.5, resize: 'none', outline: 'none' }} />
               </div>
             </div>
           </>
@@ -1395,12 +1427,12 @@ export default function JsonToolkit() {
         {activeTab === 'visualizer' && (
           <>
             {/* Interactive hint banner */}
-            <div style={{ background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(16, 185, 129, 0.1))', border: `1px solid ${t.border}`, borderRadius: 6, padding: '10px 14px', marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
-              <span style={{ fontSize: 11, color: t.text }}>✨ <strong>Interactive Editor</strong> — Double-click to edit. Click <span style={{ color: t.success, fontWeight: 600 }}>+</span> to add (choose type).</span>
-              <div style={{ display: 'flex', gap: 6, fontSize: 9, color: t.textMuted }}>
-                <span style={{ padding: '2px 6px', background: t.bgTertiary, borderRadius: 3 }}>Dbl-click = Edit</span>
-                <span style={{ padding: '2px 6px', background: t.bgTertiary, borderRadius: 3 }}><span style={{ color: t.success }}>+</span> = Add (string/number/object/array...)</span>
-                <span style={{ padding: '2px 6px', background: t.bgTertiary, borderRadius: 3 }}><span style={{ color: t.error }}>×</span> = Delete</span>
+            <div style={{ background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(16, 185, 129, 0.1))', border: `1px solid ${t.border}`, borderRadius: 8, padding: '12px 16px', marginBottom: 14, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+              <span style={{ fontSize: 13, color: t.text }}>✨ <strong>Interactive Editor</strong> — Double-click to edit. Click <span style={{ color: t.success, fontWeight: 600 }}>+</span> to add (choose type).</span>
+              <div style={{ display: 'flex', gap: 8, fontSize: 11, color: t.textMuted }}>
+                <span style={{ padding: '4px 10px', background: t.bgTertiary, borderRadius: 4 }}>Dbl-click = Edit</span>
+                <span style={{ padding: '4px 10px', background: t.bgTertiary, borderRadius: 4 }}><span style={{ color: t.success }}>+</span> = Add</span>
+                <span style={{ padding: '4px 10px', background: t.bgTertiary, borderRadius: 4 }}><span style={{ color: t.error }}>×</span> = Delete</span>
               </div>
             </div>
             <div style={{ marginBottom: 14 }}>
@@ -1409,31 +1441,31 @@ export default function JsonToolkit() {
             {vizParsed.valid && vizParsed.data && (
               <>
                 {vizStats && (
-                  <div style={{ display: 'flex', gap: 5, padding: '8px 12px', background: t.bgSecondary, borderRadius: 6, marginBottom: 12, flexWrap: 'wrap', border: `1px solid ${t.border}` }}>
+                  <div style={{ display: 'flex', gap: 8, padding: '10px 14px', background: t.bgSecondary, borderRadius: 8, marginBottom: 14, flexWrap: 'wrap', border: `1px solid ${t.border}` }}>
                     {[{ l: 'Objects', v: vizStats.objects, c: t.bracket }, { l: 'Arrays', v: vizStats.arrays, c: '#7dd3fc' }, { l: 'Strings', v: vizStats.strings, c: t.string }, { l: 'Numbers', v: vizStats.numbers, c: t.number }, { l: 'Keys', v: vizStats.totalKeys, c: t.key }, { l: 'Depth', v: vizStats.maxDepth, c: t.accent }].map(s => (
-                      <div key={s.l} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '2px 6px', background: t.bgTertiary, borderRadius: 4 }}>
-                        <span style={{ color: s.c, fontWeight: 700, fontSize: 11 }}>{s.v}</span>
-                        <span style={{ color: t.textMuted, fontSize: 8, textTransform: 'uppercase' }}>{s.l}</span>
+                      <div key={s.l} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', background: t.bgTertiary, borderRadius: 5 }}>
+                        <span style={{ color: s.c, fontWeight: 700, fontSize: 14 }}>{s.v}</span>
+                        <span style={{ color: t.textMuted, fontSize: 10, textTransform: 'uppercase' }}>{s.l}</span>
                       </div>
                     ))}
                   </div>
                 )}
-                <div style={{ display: 'flex', gap: 4, marginBottom: 10, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
-                  <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                    <button onClick={expandVizAll} style={{ padding: '4px 8px', background: t.bgSecondary, border: `1px solid ${t.border}`, borderRadius: 4, color: t.textSecondary, cursor: 'pointer', fontSize: 9 }}>Expand All</button>
-                    <button onClick={() => setVizExpanded(new Set(['$']))} style={{ padding: '4px 8px', background: t.bgSecondary, border: `1px solid ${t.border}`, borderRadius: 4, color: t.textSecondary, cursor: 'pointer', fontSize: 9 }}>Collapse</button>
-                    <span style={{ fontSize: 9, color: t.textMuted, marginLeft: 4 }}>Level:</span>
-                    {[1, 2, 3, 4].map(l => <button key={l} onClick={() => expandToLevel(l)} style={{ width: 22, height: 22, background: t.bgSecondary, border: `1px solid ${t.border}`, borderRadius: 4, color: t.textSecondary, cursor: 'pointer', fontSize: 9, fontWeight: 600 }}>{l}</button>)}
+                <div style={{ display: 'flex', gap: 8, marginBottom: 14, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <button onClick={expandVizAll} style={btnStyle}>Expand All</button>
+                    <button onClick={() => setVizExpanded(new Set(['$']))} style={btnStyle}>Collapse</button>
+                    <span style={{ fontSize: 13, color: t.textMuted, marginLeft: 8 }}>Level:</span>
+                    {[1, 2, 3, 4].map(l => <button key={l} onClick={() => expandToLevel(l)} style={{ ...btnStyle, width: 32, padding: '8px' }}>{l}</button>)}
                   </div>
-                  <input type="text" placeholder="Search..." value={vizSearch} onChange={e => setVizSearch(e.target.value)} style={{ padding: '4px 8px', background: t.bgSecondary, border: `1px solid ${t.border}`, borderRadius: 4, color: t.text, fontSize: 9, width: 140, outline: 'none' }} />
+                  <input type="text" placeholder="🔍 Search..." value={vizSearch} onChange={e => setVizSearch(e.target.value)} style={{ padding: '8px 14px', background: t.bgSecondary, border: `1px solid ${t.border}`, borderRadius: 6, color: t.text, fontSize: 13, width: 160, outline: 'none' }} />
                 </div>
-                <div style={{ background: t.bgSecondary, borderRadius: 8, border: `1px solid ${t.border}`, overflow: 'hidden' }}>
-                  <div style={{ padding: '8px 10px', background: t.bgTertiary, borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <span style={{ fontSize: 10, fontWeight: 600, color: t.text }}>Interactive Tree View</span>
-                      <span style={{ fontSize: 8, padding: '2px 5px', background: t.accentLight, color: t.accent, borderRadius: 3, fontWeight: 600 }}>EDITABLE</span>
+                <div style={{ background: t.bgSecondary, borderRadius: 10, border: `1px solid ${t.border}`, overflow: 'hidden' }}>
+                  <div style={{ padding: '10px 14px', background: t.bgTertiary, borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: t.text }}>Interactive Tree View</span>
+                      <span style={{ fontSize: 10, padding: '3px 8px', background: t.accentLight, color: t.accent, borderRadius: 4, fontWeight: 600 }}>EDITABLE</span>
                     </div>
-                    <div style={{ display: 'flex', gap: 8, fontSize: 9, color: t.textMuted }}>
+                    <div style={{ display: 'flex', gap: 10, fontSize: 11, color: t.textMuted }}>
                       <span><span style={{ color: t.key }}>●</span> Key</span>
                       <span><span style={{ color: t.string }}>●</span> String</span>
                       <span><span style={{ color: t.number }}>●</span> Number</span>
@@ -1445,10 +1477,10 @@ export default function JsonToolkit() {
               </>
             )}
             {!vizParsed.data && (
-              <div style={{ background: t.bgSecondary, borderRadius: 8, border: `1px solid ${t.border}`, padding: 40, textAlign: 'center' }}>
-                <p style={{ fontSize: 12, fontWeight: 500, color: t.text, marginBottom: 4 }}>Interactive Data Editor</p>
-                <p style={{ fontSize: 10, color: t.textMuted, marginBottom: 12 }}>Paste JSON or YAML to explore and edit</p>
-                <button onClick={loadSample} style={{ padding: '8px 14px', background: `linear-gradient(135deg, ${t.accent}, #10b981)`, border: 'none', borderRadius: 5, color: 'white', cursor: 'pointer', fontSize: 10, fontWeight: 600 }}>Load Sample</button>
+              <div style={{ background: t.bgSecondary, borderRadius: 8, border: `1px solid ${t.border}`, padding: 40, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                <p style={{ fontSize: 14, fontWeight: 500, color: t.text, marginBottom: 6 }}>Interactive Data Editor</p>
+                <p style={{ fontSize: 12, color: t.textMuted, marginBottom: 16 }}>Paste JSON or YAML to explore and edit</p>
+                <button onClick={loadSample} style={{ ...btnStylePrimary, display: 'inline-flex' }}>📄 Load Sample</button>
               </div>
             )}
           </>
@@ -1458,26 +1490,26 @@ export default function JsonToolkit() {
         {activeTab === 'validate' && (
           <div style={{ maxWidth: 600, margin: '0 auto' }}>
             <InputPanel side="viz" label="JSON or YAML to Validate" color={t.accent} value={visualizerJson} setter={setVisualizerJson} parsed={vizParsed} height={160} />
-            <div style={{ marginTop: 14, background: t.bgSecondary, borderRadius: 8, border: `1px solid ${t.border}`, overflow: 'hidden' }}>
-              <div style={{ padding: '8px 12px', background: t.bgTertiary, borderBottom: `1px solid ${t.border}` }}>
-                <span style={{ fontSize: 10, fontWeight: 600, color: t.text }}>Validation Result</span>
+            <div style={{ marginTop: 16, background: t.bgSecondary, borderRadius: 10, border: `1px solid ${t.border}`, overflow: 'hidden' }}>
+              <div style={{ padding: '10px 14px', background: t.bgTertiary, borderBottom: `1px solid ${t.border}` }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: t.text }}>Validation Result</span>
               </div>
-              <div style={{ padding: 16 }}>
+              <div style={{ padding: 20 }}>
                 {!visualizerJson.trim() ? (
-                  <div style={{ textAlign: 'center', padding: 30, color: t.textMuted }}>
-                    <p style={{ fontSize: 11 }}>Enter JSON or YAML to validate</p>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: 40, color: t.textMuted }}>
+                    <p style={{ fontSize: 14 }}>Enter JSON or YAML to validate</p>
                   </div>
                 ) : vizParsed.valid ? (
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontSize: 48, marginBottom: 8 }}>✅</div>
-                    <h3 style={{ margin: 0, color: t.success, fontSize: 18, fontWeight: 700 }}>Valid {vizParsed.format === 'yaml' ? 'YAML' : 'JSON'}!</h3>
-                    {vizParsed.wasFixed && <p style={{ margin: '8px 0 0', color: t.warning, fontSize: 11 }}>⚠ Auto-corrected: Added quotes to keys</p>}
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                    <div style={{ fontSize: 56, marginBottom: 12 }}>✅</div>
+                    <h3 style={{ margin: 0, color: t.success, fontSize: 22, fontWeight: 700 }}>Valid {vizParsed.format === 'yaml' ? 'YAML' : 'JSON'}!</h3>
+                    {vizParsed.wasFixed && <p style={{ margin: '10px 0 0', color: t.warning, fontSize: 13 }}>⚠ Auto-corrected: Added quotes to keys</p>}
                     {vizStats && (
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginTop: 16 }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginTop: 20, width: '100%' }}>
                         {[{ l: 'Objects', v: vizStats.objects }, { l: 'Arrays', v: vizStats.arrays }, { l: 'Keys', v: vizStats.totalKeys }, { l: 'Depth', v: vizStats.maxDepth }].map(s => (
-                          <div key={s.l} style={{ padding: 10, background: t.bgTertiary, borderRadius: 6 }}>
-                            <div style={{ fontSize: 20, fontWeight: 700, color: t.text }}>{s.v}</div>
-                            <div style={{ fontSize: 9, color: t.textMuted, textTransform: 'uppercase' }}>{s.l}</div>
+                          <div key={s.l} style={{ padding: 14, background: t.bgTertiary, borderRadius: 8, textAlign: 'center' }}>
+                            <div style={{ fontSize: 24, fontWeight: 700, color: t.text }}>{s.v}</div>
+                            <div style={{ fontSize: 11, color: t.textMuted, textTransform: 'uppercase' }}>{s.l}</div>
                           </div>
                         ))}
                       </div>
@@ -1485,24 +1517,24 @@ export default function JsonToolkit() {
                   </div>
                 ) : (
                   <div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 14, background: t.errorLight, borderRadius: 8, border: `1px solid ${t.error}30` }}>
-                      <div style={{ fontSize: 32 }}>❌</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 18, background: t.errorLight, borderRadius: 10, border: `1px solid ${t.error}30` }}>
+                      <div style={{ fontSize: 40 }}>❌</div>
                       <div>
-                        <h4 style={{ margin: 0, color: t.error, fontSize: 14, fontWeight: 600 }}>Invalid {detectFormat(visualizerJson) === 'yaml' ? 'YAML' : 'JSON'}</h4>
-                        <p style={{ margin: '4px 0 0', color: t.error, fontSize: 11, opacity: 0.8 }}>{vizParsed.error}</p>
+                        <h4 style={{ margin: 0, color: t.error, fontSize: 16, fontWeight: 600 }}>Invalid {detectFormat(visualizerJson) === 'yaml' ? 'YAML' : 'JSON'}</h4>
+                        <p style={{ margin: '6px 0 0', color: t.error, fontSize: 13, opacity: 0.8 }}>{vizParsed.error}</p>
                       </div>
                     </div>
                     {vizParsed.line && (
-                      <div style={{ marginTop: 12 }}>
-                        <div style={{ fontSize: 9, color: t.textMuted, marginBottom: 4, fontWeight: 600 }}>ERROR LOCATION</div>
-                        <div style={{ fontFamily: 'monospace', fontSize: 10, background: t.bgTertiary, borderRadius: 4, overflow: 'hidden', border: `1px solid ${t.border}` }}>
+                      <div style={{ marginTop: 16 }}>
+                        <div style={{ fontSize: 11, color: t.textMuted, marginBottom: 6, fontWeight: 600 }}>ERROR LOCATION</div>
+                        <div style={{ fontFamily: 'monospace', fontSize: 12, background: t.bgTertiary, borderRadius: 6, overflow: 'hidden', border: `1px solid ${t.border}` }}>
                           {visualizerJson.split('\n').slice(Math.max(0, vizParsed.line - 3), vizParsed.line + 2).map((line, i) => {
                             const num = Math.max(1, vizParsed.line - 2) + i;
                             const isErr = num === vizParsed.line;
                             return (
                               <div key={i} style={{ display: 'flex', background: isErr ? t.errorLight : 'transparent' }}>
-                                <span style={{ width: 36, padding: '4px 8px', color: isErr ? t.error : t.textDim, background: t.bgTertiary, textAlign: 'right', borderRight: isErr ? `2px solid ${t.error}` : '2px solid transparent', fontWeight: isErr ? 700 : 400 }}>{num}</span>
-                                <span style={{ padding: '4px 8px', color: isErr ? t.error : t.textSecondary, whiteSpace: 'pre' }}>{line || ' '}</span>
+                                <span style={{ width: 44, padding: '6px 10px', color: isErr ? t.error : t.textDim, background: t.bgTertiary, textAlign: 'right', borderRight: isErr ? `2px solid ${t.error}` : '2px solid transparent', fontWeight: isErr ? 700 : 400 }}>{num}</span>
+                                <span style={{ padding: '6px 10px', color: isErr ? t.error : t.textSecondary, whiteSpace: 'pre' }}>{line || ' '}</span>
                               </div>
                             );
                           })}
@@ -1520,11 +1552,11 @@ export default function JsonToolkit() {
         {activeTab === 'jwt' && (
           <div style={{ maxWidth: 900, margin: '0 auto' }}>
             {/* Mode Toggle */}
-            <div style={{ background: 'linear-gradient(135deg, rgba(236, 72, 153, 0.1), rgba(168, 85, 247, 0.1))', border: `1px solid ${t.border}`, borderRadius: 6, padding: '10px 14px', marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: 11, color: t.text }}>🔐 <span style={{ color: '#ec4899', fontWeight: 600 }}>JWT</span> Token Decoder & Encoder</span>
-              <div style={{ display: 'flex', gap: 4 }}>
-                <button onClick={() => setJwtMode('decode')} style={{ padding: '5px 10px', background: jwtMode === 'decode' ? 'rgba(236, 72, 153, 0.2)' : t.bgTertiary, border: `1px solid ${jwtMode === 'decode' ? 'rgba(236, 72, 153, 0.4)' : t.border}`, borderRadius: 5, color: jwtMode === 'decode' ? '#ec4899' : t.textMuted, cursor: 'pointer', fontSize: 10, fontWeight: 600 }}>Decode</button>
-                <button onClick={() => setJwtMode('encode')} style={{ padding: '5px 10px', background: jwtMode === 'encode' ? 'rgba(168, 85, 247, 0.2)' : t.bgTertiary, border: `1px solid ${jwtMode === 'encode' ? 'rgba(168, 85, 247, 0.4)' : t.border}`, borderRadius: 5, color: jwtMode === 'encode' ? '#a855f7' : t.textMuted, cursor: 'pointer', fontSize: 10, fontWeight: 600 }}>Encode</button>
+            <div style={{ background: 'linear-gradient(135deg, rgba(236, 72, 153, 0.1), rgba(168, 85, 247, 0.1))', border: `1px solid ${t.border}`, borderRadius: 8, padding: '12px 16px', marginBottom: 14, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 13, color: t.text }}>🔐 <span style={{ color: '#ec4899', fontWeight: 600 }}>JWT</span> Token Decoder & Encoder</span>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button onClick={() => setJwtMode('decode')} style={{ padding: '8px 14px', background: jwtMode === 'decode' ? 'rgba(236, 72, 153, 0.2)' : t.bgTertiary, border: `2px solid ${jwtMode === 'decode' ? 'rgba(236, 72, 153, 0.5)' : t.border}`, borderRadius: 6, color: jwtMode === 'decode' ? '#ec4899' : t.textMuted, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>🔓 Decode</button>
+                <button onClick={() => setJwtMode('encode')} style={{ padding: '8px 14px', background: jwtMode === 'encode' ? 'rgba(168, 85, 247, 0.2)' : t.bgTertiary, border: `2px solid ${jwtMode === 'encode' ? 'rgba(168, 85, 247, 0.5)' : t.border}`, borderRadius: 6, color: jwtMode === 'encode' ? '#a855f7' : t.textMuted, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>🔐 Encode</button>
               </div>
             </div>
 
@@ -1533,26 +1565,24 @@ export default function JsonToolkit() {
               <>
                 {/* JWT Input */}
                 <div style={{ background: t.bgSecondary, borderRadius: 10, border: `1px solid ${!jwtDecoded?.valid && jwtInput ? t.error + '60' : t.border}`, overflow: 'hidden', marginBottom: 14 }}>
-                  <div style={{ padding: '8px 12px', background: t.bgTertiary, borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#ec4899', boxShadow: '0 0 6px #ec4899' }} />
-                      <span style={{ fontSize: 11, fontWeight: 600, color: t.text }}>JWT Token</span>
-                      {jwtDecoded?.valid && <span style={{ fontSize: 9, color: t.success, background: t.successLight, padding: '1px 5px', borderRadius: 3 }}>✓ Valid</span>}
+                  <div style={{ padding: '10px 14px', background: t.bgTertiary, borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#ec4899', boxShadow: '0 0 6px #ec4899' }} />
+                      <span style={{ fontSize: 13, fontWeight: 600, color: t.text }}>JWT Token</span>
+                      {jwtDecoded?.valid && <span style={{ fontSize: 10, color: t.success, background: t.successLight, padding: '2px 8px', borderRadius: 4 }}>✓ Valid</span>}
                     </div>
-                    <div style={{ display: 'flex', gap: 3 }}>
-                      <button onClick={() => copy(jwtInput, 'jwt-input')} style={{ padding: '3px 6px', background: t.bgHover, border: 'none', borderRadius: 3, color: copied === 'jwt-input' ? t.success : t.textSecondary, cursor: 'pointer', fontSize: 9 }}>{copied === 'jwt-input' ? '✓' : 'Copy'}</button>
-                    </div>
+                    <button onClick={() => copy(jwtInput, 'jwt-input')} style={{ ...btnStyle, height: 26 }}>{copied === 'jwt-input' ? '✓' : 'Copy'}</button>
                   </div>
-                  <textarea value={jwtInput} onChange={e => setJwtInput(e.target.value)} placeholder="Paste your JWT token here (e.g., eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...)" style={{ width: '100%', height: 80, padding: 10, background: 'transparent', border: 'none', color: t.text, fontSize: 11, fontFamily: 'monospace', lineHeight: 1.5, resize: 'none', outline: 'none', wordBreak: 'break-all' }} spellCheck={false} />
-                  {!jwtDecoded?.valid && jwtInput && <div style={{ padding: '8px 12px', background: t.errorLight, borderTop: `1px solid ${t.error}30`, color: t.error, fontSize: 10 }}>⚠ {jwtDecoded?.error}</div>}
+                  <textarea value={jwtInput} onChange={e => setJwtInput(e.target.value)} placeholder="Paste your JWT token here (e.g., eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...)" style={{ width: '100%', height: 80, padding: 12, background: 'transparent', border: 'none', color: t.text, fontSize: 12, fontFamily: 'monospace', lineHeight: 1.5, resize: 'none', outline: 'none', wordBreak: 'break-all' }} spellCheck={false} />
+                  {!jwtDecoded?.valid && jwtInput && <div style={{ padding: '10px 14px', background: t.errorLight, borderTop: `1px solid ${t.error}30`, color: t.error, fontSize: 12 }}>⚠ {jwtDecoded?.error}</div>}
                 </div>
 
                 {/* Empty State */}
                 {!jwtInput.trim() && (
-                  <div style={{ background: t.bgSecondary, borderRadius: 8, border: `1px solid ${t.border}`, padding: 40, textAlign: 'center' }}>
-                    <p style={{ fontSize: 12, fontWeight: 500, color: t.text, marginBottom: 4 }}>Decode JWT Token</p>
-                    <p style={{ fontSize: 10, color: t.textMuted, marginBottom: 12 }}>Paste a JWT to decode and analyze its contents</p>
-                    <button onClick={loadSample} style={{ padding: '8px 14px', background: 'linear-gradient(135deg, #ec4899, #a855f7)', border: 'none', borderRadius: 5, color: 'white', cursor: 'pointer', fontSize: 10, fontWeight: 600 }}>Load Sample</button>
+                  <div style={{ background: t.bgSecondary, borderRadius: 8, border: `1px solid ${t.border}`, padding: 40, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                    <p style={{ fontSize: 14, fontWeight: 500, color: t.text, marginBottom: 6 }}>Decode JWT Token</p>
+                    <p style={{ fontSize: 12, color: t.textMuted, marginBottom: 16 }}>Paste a JWT to decode and analyze its contents</p>
+                    <button onClick={loadSample} style={{ padding: '10px 18px', background: 'linear-gradient(135deg, #ec4899, #a855f7)', border: 'none', borderRadius: 6, color: 'white', cursor: 'pointer', fontSize: 13, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 6 }}>📄 Load Sample</button>
                   </div>
                 )}
 
@@ -1697,15 +1727,15 @@ export default function JsonToolkit() {
 
                 {/* Generated Token */}
                 {jwtEncoded?.valid && (
-                  <div style={{ background: t.bgSecondary, borderRadius: 8, border: `1px solid ${t.border}`, overflow: 'hidden' }}>
-                    <div style={{ padding: '8px 12px', background: t.bgTertiary, borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#a855f7' }} />
-                        <span style={{ fontSize: 11, fontWeight: 600, color: t.text }}>Generated Token (Unsigned)</span>
+                  <div style={{ background: t.bgSecondary, borderRadius: 10, border: `1px solid ${t.border}`, overflow: 'hidden' }}>
+                    <div style={{ padding: '10px 14px', background: t.bgTertiary, borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#a855f7' }} />
+                        <span style={{ fontSize: 13, fontWeight: 600, color: t.text }}>Generated Token (Unsigned)</span>
                       </div>
-                      <button onClick={() => copy(jwtEncoded.token, 'jwt-encoded')} style={{ padding: '3px 6px', background: t.bgHover, border: 'none', borderRadius: 3, color: copied === 'jwt-encoded' ? t.success : t.textSecondary, cursor: 'pointer', fontSize: 9 }}>{copied === 'jwt-encoded' ? '✓' : 'Copy'}</button>
+                      <button onClick={() => copy(jwtEncoded.token, 'jwt-encoded')} style={{ ...btnStyle, height: 28 }}>{copied === 'jwt-encoded' ? '✓ Copied' : '📋 Copy'}</button>
                     </div>
-                    <div style={{ padding: 12, fontFamily: 'monospace', fontSize: 10, lineHeight: 1.6, wordBreak: 'break-all', color: t.text }}>{jwtEncoded.token}</div>
+                    <div style={{ padding: 14, fontFamily: 'monospace', fontSize: 12, lineHeight: 1.6, wordBreak: 'break-all', color: t.text }}>{jwtEncoded.token}</div>
                   </div>
                 )}
               </>
@@ -1714,19 +1744,19 @@ export default function JsonToolkit() {
         )}
 
         {/* Features */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 8, marginTop: 20 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 12, marginTop: 28 }}>
           {[{ i: '🔄', t: 'JSON↔YAML', d: 'Convert formats' }, { i: '⇄', t: 'Diff+Revert', d: 'Compare & sync' }, { i: '✏️', t: 'Editor', d: 'Edit in tree' }, { i: '✅', t: 'Validate', d: 'Check syntax' }, { i: '🔐', t: 'JWT', d: 'Decode tokens' }, { i: '🌓', t: 'Themes', d: 'Dark & light' }].map((f, i) => (
-            <div key={i} style={{ padding: 10, background: t.bgSecondary, borderRadius: 6, border: `1px solid ${t.border}` }}>
-              <div style={{ fontSize: 16, marginBottom: 4 }}>{f.i}</div>
-              <h3 style={{ margin: 0, fontSize: 10, fontWeight: 600, color: t.text }}>{f.t}</h3>
-              <p style={{ margin: 0, fontSize: 8, color: t.textMuted }}>{f.d}</p>
+            <div key={i} style={{ padding: 14, background: t.bgSecondary, borderRadius: 10, border: `1px solid ${t.border}` }}>
+              <div style={{ fontSize: 22, marginBottom: 6 }}>{f.i}</div>
+              <h3 style={{ margin: 0, fontSize: 13, fontWeight: 600, color: t.text }}>{f.t}</h3>
+              <p style={{ margin: '4px 0 0', fontSize: 11, color: t.textMuted }}>{f.d}</p>
             </div>
           ))}
         </div>
       </main>
 
-      <footer style={{ padding: '12px 20px', borderTop: `1px solid ${t.border}`, marginTop: 20, textAlign: 'center' }}>
-        <p style={{ margin: 0, fontSize: 9, color: t.textDim }}>JSON/YAML Toolkit • Built for developers</p>
+      <footer style={{ padding: '16px 24px', borderTop: `1px solid ${t.border}`, marginTop: 24, textAlign: 'center' }}>
+        <p style={{ margin: 0, fontSize: 12, color: t.textDim }}>JSON/YAML Toolkit • Built for developers</p>
       </footer>
     </div>
   );
