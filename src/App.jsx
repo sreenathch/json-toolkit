@@ -1,130 +1,25 @@
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import * as yaml from 'js-yaml';
 
-// Simple YAML Parser (handles common cases)
-const yamlParse = (str) => {
-  const lines = str.split('\n');
-  const result = {};
-  const stack = [{ indent: -1, obj: result, isArray: false }];
-  
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const trimmed = line.trim();
-    
-    // Skip empty lines and comments
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    
-    // Calculate indent
-    const indent = line.search(/\S/);
-    
-    // Pop stack until we find parent
-    while (stack.length > 1 && stack[stack.length - 1].indent >= indent) {
-      stack.pop();
-    }
-    
-    const parent = stack[stack.length - 1];
-    
-    // Array item
-    if (trimmed.startsWith('- ')) {
-      const content = trimmed.slice(2).trim();
-      
-      if (!parent.isArray) {
-        const arr = [];
-        if (parent.currentKey) {
-          parent.obj[parent.currentKey] = arr;
-        }
-        stack.push({ indent, obj: arr, isArray: true });
-      }
-      
-      const currentParent = stack[stack.length - 1];
-      
-      if (content.includes(': ')) {
-        const obj = {};
-        const [key, ...valueParts] = content.split(': ');
-        const value = valueParts.join(': ');
-        obj[key.trim()] = parseValue(value.trim());
-        currentParent.obj.push(obj);
-        stack.push({ indent: indent + 2, obj, isArray: false });
-      } else if (content) {
-        currentParent.obj.push(parseValue(content));
-      } else {
-        const obj = {};
-        currentParent.obj.push(obj);
-        stack.push({ indent: indent + 2, obj, isArray: false });
-      }
-      continue;
-    }
-    
-    // Key-value pair
-    const colonIndex = trimmed.indexOf(':');
-    if (colonIndex > 0) {
-      const key = trimmed.slice(0, colonIndex).trim();
-      const value = trimmed.slice(colonIndex + 1).trim();
-      
-      if (value) {
-        parent.obj[key] = parseValue(value);
-      } else {
-        // Nested object or array coming
-        parent.obj[key] = {};
-        parent.currentKey = key;
-        stack.push({ indent, obj: parent.obj, isArray: false, currentKey: key });
-      }
-    }
-  }
-  
-  return result;
+// YAML parsing and serialisation are delegated to js-yaml.
+//
+// This replaced a hand-rolled parser that silently corrupted ordinary
+// documents: a nested mapping was flattened into its parent (leaving the
+// parent as {}), and each sibling list item rebuilt the array from scratch so
+// only the final entry survived. Both failures reported "valid".
+const YAML_DUMP_OPTIONS = {
+  indent: 2,
+  lineWidth: -1, // never fold long scalars onto continuation lines
+  noRefs: true,  // repeat shared objects rather than emit &anchor / *alias
 };
 
-const parseValue = (value) => {
-  if (value === 'true') return true;
-  if (value === 'false') return false;
-  if (value === 'null' || value === '~') return null;
-  if (value.startsWith('"') && value.endsWith('"')) return value.slice(1, -1);
-  if (value.startsWith("'") && value.endsWith("'")) return value.slice(1, -1);
-  if (/^-?\d+$/.test(value)) return parseInt(value, 10);
-  if (/^-?\d*\.\d+$/.test(value)) return parseFloat(value);
-  return value;
-};
-
-// Convert to YAML string
-const toYamlString = (data, indent = 0) => {
-  const spaces = '  '.repeat(indent);
-  
-  if (data === null) return 'null';
-  if (typeof data === 'boolean') return String(data);
-  if (typeof data === 'number') return String(data);
-  if (typeof data === 'string') {
-    if (data.includes('\n') || data.includes(':') || data.includes('#')) {
-      return `"${data.replace(/"/g, '\\"')}"`;
-    }
-    return data;
+const toYamlString = (data) => {
+  try {
+    return yaml.dump(data, YAML_DUMP_OPTIONS);
+  } catch {
+    // Circular or otherwise unrepresentable — degrade instead of crashing the UI
+    return JSON.stringify(data, null, 2);
   }
-  
-  if (Array.isArray(data)) {
-    if (data.length === 0) return '[]';
-    return data.map(item => {
-      if (typeof item === 'object' && item !== null) {
-        const inner = toYamlString(item, indent + 1);
-        const firstLine = inner.split('\n')[0];
-        const rest = inner.split('\n').slice(1).join('\n');
-        return `${spaces}- ${firstLine}${rest ? '\n' + rest : ''}`;
-      }
-      return `${spaces}- ${toYamlString(item, indent)}`;
-    }).join('\n');
-  }
-  
-  if (typeof data === 'object') {
-    const entries = Object.entries(data);
-    if (entries.length === 0) return '{}';
-    return entries.map(([key, value]) => {
-      if (typeof value === 'object' && value !== null) {
-        const inner = toYamlString(value, indent + 1);
-        return `${spaces}${key}:\n${inner}`;
-      }
-      return `${spaces}${key}: ${toYamlString(value, indent)}`;
-    }).join('\n');
-  }
-  
-  return String(data);
 };
 
 // Theme definitions
@@ -257,6 +152,9 @@ const detectFormat = (str) => {
   const trimmed = str.trim();
   if (!trimmed) return 'unknown';
   if (trimmed.startsWith('{') || trimmed.startsWith('[')) return 'json';
+  // HTML/XML would otherwise be labelled "valid YAML" — an API returning an
+  // error page is the common way to hit this.
+  if (trimmed.startsWith('<')) return 'markup';
   return 'yaml';
 };
 
@@ -284,17 +182,33 @@ const parseJson = (str) => {
 const parseYamlStr = (str) => {
   if (!str.trim()) return { valid: true, data: null, error: null, line: null, format: 'yaml' };
   try {
-    const data = yamlParse(str);
-    return { valid: true, data, error: null, line: null, format: 'yaml' };
+    const data = yaml.load(str);
+    // A scalar document ("hello") parses fine but is not a structure to diff.
+    if (data !== null && typeof data !== 'object') {
+      return { valid: false, data: null, error: 'Expected an object or list, got a single scalar value', line: null, format: 'yaml' };
+    }
+    return { valid: true, data: data ?? null, error: null, line: null, format: 'yaml' };
   } catch (e) {
-    return { valid: false, data: null, error: e.message, line: null, format: 'yaml' };
+    // js-yaml reports a 0-based line on the exception's mark
+    return {
+      valid: false,
+      data: null,
+      error: e.reason || e.message,
+      line: e.mark ? e.mark.line + 1 : null,
+      format: 'yaml',
+    };
   }
 };
 
 // Smart parse
 const smartParse = (str) => {
   if (!str.trim()) return { valid: true, data: null, error: null, line: null, format: 'unknown' };
-  return detectFormat(str) === 'json' ? parseJson(str) : parseYamlStr(str);
+  const format = detectFormat(str);
+  if (format === 'json') return parseJson(str);
+  if (format === 'markup') {
+    return { valid: false, data: null, error: 'This looks like HTML or XML, not JSON or YAML', line: null, format: 'markup' };
+  }
+  return parseYamlStr(str);
 };
 
 // JSON stringify helper
@@ -398,6 +312,225 @@ const createJWT = (header, payload) => {
   }
 };
 
+// ---------------------------------------------------------------------------
+// Request import — paste a URL or a curl command and load the response
+// ---------------------------------------------------------------------------
+
+// Split a curl command into argv, honouring quotes and line continuations.
+const tokenizeCurl = (input) => {
+  const text = input.replace(/\\\r?\n/g, ' ');
+  const tokens = [];
+  let cur = '', quote = null, quoted = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (quote) {
+      if (ch === '\\' && quote === '"' && i + 1 < text.length) { cur += text[++i]; continue; }
+      if (ch === quote) { quote = null; continue; }
+      cur += ch;
+    } else if (ch === '"' || ch === "'") {
+      quote = ch; quoted = true;
+    } else if (/\s/.test(ch)) {
+      if (cur || quoted) { tokens.push(cur); cur = ''; quoted = false; }
+    } else {
+      cur += ch;
+    }
+  }
+  if (cur || quoted) tokens.push(cur);
+  return tokens;
+};
+
+// fetch() refuses to set these, so we report them as dropped rather than lying.
+const FORBIDDEN_HEADERS = ['host', 'content-length', 'connection', 'origin', 'referer', 'cookie'];
+
+const parseRequestInput = (raw) => {
+  const text = raw.trim();
+  if (!text) return { valid: false, error: 'Paste a URL or a curl command first' };
+
+  const finish = (req) => {
+    if (!req.url) return { valid: false, error: 'No URL found in that curl command' };
+    if (!/^https?:\/\//i.test(req.url)) req.url = `https://${req.url}`;
+    let parsedUrl;
+    try { parsedUrl = new URL(req.url); } catch { return { valid: false, error: `Not a valid URL: ${req.url}` }; }
+    // `new URL` accepts bare words like "https://not", so require a real host.
+    const host = parsedUrl.hostname;
+    if (!host.includes('.') && host !== 'localhost' && !/^\[.+\]$/.test(host)) {
+      return { valid: false, error: `"${host}" is not a valid hostname` };
+    }
+    req.dropped = [...new Set(req.dropped)];
+    if (!req.method) req.method = req.body != null ? 'POST' : 'GET';
+    // curl's own default for -d when no Content-Type is given
+    if (req.body != null && !Object.keys(req.headers).some(k => k.toLowerCase() === 'content-type')) {
+      req.headers['Content-Type'] = 'application/x-www-form-urlencoded';
+    }
+    return { valid: true, ...req };
+  };
+
+  // A bare URL — must be a single token, or it is prose rather than a URL
+  if (!/^curl\b/i.test(text)) {
+    if (/\s/.test(text)) return { valid: false, error: 'Paste a single URL, or a full curl command' };
+    return finish({ method: null, url: text, headers: {}, body: null, dropped: [] });
+  }
+
+  const argv = tokenizeCurl(text);
+  const req = { method: null, url: null, headers: {}, body: null, dropped: [] };
+  const next = () => argv[++i];
+  let i = 0;
+
+  for (i = 1; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === '-X' || arg === '--request') {
+      req.method = (next() || 'GET').toUpperCase();
+    } else if (arg === '-H' || arg === '--header') {
+      const h = next() || '';
+      const idx = h.indexOf(':');
+      if (idx > 0) {
+        const name = h.slice(0, idx).trim();
+        if (FORBIDDEN_HEADERS.includes(name.toLowerCase())) req.dropped.push(name);
+        else req.headers[name] = h.slice(idx + 1).trim();
+      }
+    } else if (['-d', '--data', '--data-raw', '--data-binary', '--data-ascii'].includes(arg)) {
+      req.body = next() ?? '';
+    } else if (arg === '-u' || arg === '--user') {
+      req.headers.Authorization = 'Basic ' + btoa(next() || '');
+    } else if (arg === '-b' || arg === '--cookie') {
+      next(); req.dropped.push('Cookie');
+    } else if (arg === '-A' || arg === '--user-agent') {
+      next(); req.dropped.push('User-Agent');
+    } else if (arg === '-e' || arg === '--referer') {
+      next(); req.dropped.push('Referer');
+    } else if (arg === '--url') {
+      req.url = next();
+    } else if (arg === '-G' || arg === '--get') {
+      req.method = 'GET';
+    } else if (arg === '-I' || arg === '--head') {
+      req.method = 'HEAD';
+    } else if (['-o', '--output', '--max-time', '--connect-timeout', '--retry'].includes(arg)) {
+      next(); // consume the value, ignore the flag
+    } else if (arg.startsWith('-')) {
+      // valueless flags with no browser equivalent: -L, -k, -s, -i, -v, --compressed
+    } else if (!req.url) {
+      req.url = arg;
+    }
+  }
+
+  return finish(req);
+};
+
+const PROXY_KEY = 'jsonToolkit.proxyUrl';
+const loadProxyUrl = () => { try { return localStorage.getItem(PROXY_KEY) || ''; } catch { return ''; } };
+const storeProxyUrl = (v) => { try { v ? localStorage.setItem(PROXY_KEY, v) : localStorage.removeItem(PROXY_KEY); } catch { /* private mode */ } };
+
+// Try the API directly; fall back to the configured proxy when CORS blocks it.
+// A CORS rejection is indistinguishable from a network failure here — both
+// surface as "Failed to fetch" — so the fallback covers either case.
+const sendRequest = async (req, proxyUrl) => {
+  const attempt = async (via) => {
+    const init = { method: req.method, headers: { ...req.headers }, redirect: 'follow' };
+    if (req.body != null && req.method !== 'GET' && req.method !== 'HEAD') init.body = req.body;
+    const target = via === 'proxy'
+      ? `${proxyUrl.replace(/\/+$/, '')}/?url=${encodeURIComponent(req.url)}`
+      : req.url;
+    const res = await fetch(target, init);
+    return { ok: res.ok, status: res.status, statusText: res.statusText, text: await res.text(), via };
+  };
+
+  try {
+    return await attempt('direct');
+  } catch (direct) {
+    if (!proxyUrl) {
+      return { failed: true, error: `${direct.message} — the server is probably blocking cross-origin requests. Set a proxy URL to reach it.` };
+    }
+    try {
+      return await attempt('proxy');
+    } catch (viaProxy) {
+      return { failed: true, error: `Direct: ${direct.message}. Proxy: ${viaProxy.message}. Check that the proxy is deployed and allows this origin.` };
+    }
+  }
+};
+
+const Badge = ({ format }) => (
+  <span style={{ fontSize: 10, padding: '3px 8px', borderRadius: 4, fontWeight: 600, textTransform: 'uppercase', background: format === 'yaml' ? 'rgba(250, 204, 21, 0.15)' : 'rgba(96, 165, 250, 0.15)', color: format === 'yaml' ? '#facc15' : '#60a5fa', border: `1px solid ${format === 'yaml' ? 'rgba(250, 204, 21, 0.3)' : 'rgba(96, 165, 250, 0.3)'}` }}>
+    {format}
+  </span>
+);
+
+// NOTE: defined at module scope on purpose. Nesting this inside JsonToolkit
+// makes React see a new component type every render, which remounts the
+// textarea and drops focus after a single keystroke.
+const InputPanel = ({ t, actions, copied, side, label, color, value, setter, parsed, height = 180 }) => (
+  <div style={{ background: t.bgSecondary, borderRadius: 10, border: `1px solid ${!parsed.valid && value ? t.error + '60' : t.border}`, overflow: 'hidden' }}>
+    <div style={{ padding: '10px 14px', background: t.bgTertiary, borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ width: 8, height: 8, borderRadius: '50%', background: color, boxShadow: `0 0 6px ${color}` }} />
+        <span style={{ fontSize: 13, fontWeight: 600, color: t.text }}>{label}</span>
+        {parsed.valid && value && parsed.format !== 'unknown' && <Badge format={parsed.format} />}
+        {parsed.valid && value && <span style={{ fontSize: 10, color: t.success, background: t.successLight, padding: '2px 8px', borderRadius: 4 }}>✓</span>}
+        {parsed.wasFixed && <span style={{ fontSize: 10, color: t.warning, background: t.warningLight, padding: '2px 8px', borderRadius: 4 }}>Fixed</span>}
+      </div>
+      <div style={{ display: 'flex', gap: 4 }}>
+        <button onClick={() => actions.format(side)} style={{ padding: '4px 10px', background: t.bgHover, border: 'none', borderRadius: 4, color: t.textSecondary, cursor: 'pointer', fontSize: 11, height: 26, display: 'flex', alignItems: 'center' }}>Format</button>
+        <button onClick={() => actions.minify(side)} style={{ padding: '4px 10px', background: t.bgHover, border: 'none', borderRadius: 4, color: t.textSecondary, cursor: 'pointer', fontSize: 11, height: 26, display: 'flex', alignItems: 'center' }}>Minify</button>
+        <button onClick={() => actions.toJsonFmt(side)} style={{ padding: '4px 10px', background: 'rgba(96, 165, 250, 0.1)', border: 'none', borderRadius: 4, color: '#60a5fa', cursor: 'pointer', fontSize: 11, height: 26, display: 'flex', alignItems: 'center' }}>→JSON</button>
+        <button onClick={() => actions.toYamlFmt(side)} style={{ padding: '4px 10px', background: 'rgba(250, 204, 21, 0.1)', border: 'none', borderRadius: 4, color: '#facc15', cursor: 'pointer', fontSize: 11, height: 26, display: 'flex', alignItems: 'center' }}>→YAML</button>
+        <button onClick={() => actions.sortKeys(side)} style={{ padding: '4px 10px', background: t.bgHover, border: 'none', borderRadius: 4, color: t.textSecondary, cursor: 'pointer', fontSize: 11, height: 26, display: 'flex', alignItems: 'center' }}>Sort</button>
+        <button onClick={() => actions.copy(value, side)} style={{ padding: '4px 10px', background: t.bgHover, border: 'none', borderRadius: 4, color: copied === side ? t.success : t.textSecondary, cursor: 'pointer', fontSize: 11, height: 26, display: 'flex', alignItems: 'center' }}>{copied === side ? '✓' : 'Copy'}</button>
+      </div>
+    </div>
+    <textarea value={value} onChange={e => setter(e.target.value)} placeholder="Paste JSON or YAML here..." style={{ width: '100%', height, padding: 12, background: 'transparent', border: 'none', color: t.text, fontSize: 12, fontFamily: 'monospace', lineHeight: 1.5, resize: 'none', outline: 'none' }} spellCheck={false} />
+    {!parsed.valid && value && <div style={{ padding: '10px 14px', background: t.errorLight, borderTop: `1px solid ${t.error}30`, color: t.error, fontSize: 12 }}>⚠ {parsed.line && `Line ${parsed.line}: `}{parsed.error}</div>}
+  </div>
+);
+
+// One request field per diff side. Module scope for the same reason as
+// InputPanel — nesting it would remount the textarea on every keystroke.
+const RequestPanel = ({ t, btnStyle, label, color, value, setter, preview, onFetch, busy, message }) => (
+  <div style={{ background: t.bgSecondary, borderRadius: 10, border: `1px solid ${t.border}`, overflow: 'hidden' }}>
+    <div style={{ padding: '10px 14px', background: t.bgTertiary, borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+        <div style={{ width: 8, height: 8, borderRadius: '50%', background: color, boxShadow: `0 0 6px ${color}`, flexShrink: 0 }} />
+        <span style={{ fontSize: 13, fontWeight: 600, color: t.text, whiteSpace: 'nowrap' }}>{label}</span>
+        {preview?.valid && (
+          <span style={{ fontSize: 10, padding: '3px 8px', borderRadius: 4, fontWeight: 600, background: t.accentLight, color: t.accent }}>{preview.method}</span>
+        )}
+        {preview?.valid && Object.keys(preview.headers).length > 0 && (
+          <span style={{ fontSize: 10, color: t.textMuted, whiteSpace: 'nowrap' }}>{Object.keys(preview.headers).length} hdr</span>
+        )}
+      </div>
+      <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+        {value && <button onClick={() => setter('')} style={{ padding: '4px 10px', background: t.bgHover, border: 'none', borderRadius: 4, color: t.textSecondary, cursor: 'pointer', fontSize: 11, height: 26 }}>Clear</button>}
+        <button onClick={onFetch} disabled={busy} style={{ padding: '4px 12px', background: busy ? t.bgHover : color + '18', border: `1px solid ${color}55`, borderRadius: 4, color: busy ? t.textMuted : color, cursor: busy ? 'wait' : 'pointer', fontSize: 11, fontWeight: 600, height: 26 }}>
+          {busy ? '⏳ Fetching…' : '↓ Fetch'}
+        </button>
+      </div>
+    </div>
+
+    <textarea
+      value={value}
+      onChange={e => setter(e.target.value)}
+      placeholder={"https://api.example.com/v1/config\n\nor a curl command:\ncurl '...' -H 'Authorization: Bearer ...'"}
+      style={{ width: '100%', height: 84, padding: 12, background: 'transparent', border: 'none', color: t.text, fontSize: 12, fontFamily: 'monospace', lineHeight: 1.5, resize: 'vertical', outline: 'none' }}
+      spellCheck={false}
+    />
+
+    {preview && !preview.valid && (
+      <div style={{ padding: '8px 14px', borderTop: `1px solid ${t.border}`, color: t.warning, fontSize: 11 }}>⚠ {preview.error}</div>
+    )}
+
+    {message && (
+      <div style={{
+        padding: '8px 14px',
+        borderTop: `1px solid ${t.border}`,
+        background: message.type === 'error' ? t.errorLight : message.type === 'warn' ? t.warningLight : t.successLight,
+        color: message.type === 'error' ? t.error : message.type === 'warn' ? t.warning : t.success,
+        fontSize: 11, fontFamily: 'monospace', wordBreak: 'break-word', lineHeight: 1.5,
+      }}>
+        {message.type === 'error' ? '✗ ' : message.type === 'warn' ? '⚠ ' : '✓ '}{message.text}
+      </div>
+    )}
+  </div>
+);
+
 export default function JsonToolkit() {
   const [theme, setTheme] = useState('dark');
   const [leftJson, setLeftJson] = useState('');
@@ -430,6 +563,14 @@ export default function JsonToolkit() {
   const [jwtMode, setJwtMode] = useState('decode');
   const [jwtHeader, setJwtHeader] = useState('{\n  "alg": "HS256",\n  "typ": "JWT"\n}');
   const [jwtPayload, setJwtPayload] = useState('{\n  "sub": "1234567890",\n  "name": "John Doe",\n  "iat": 1516239022\n}');
+
+  // Request import (Diff tab) — one field per side, fetched independently
+  const [leftRequest, setLeftRequest] = useState('');
+  const [rightRequest, setRightRequest] = useState('');
+  const [fetching, setFetching] = useState({ left: false, right: false });
+  const [fetchMsg, setFetchMsg] = useState({ left: null, right: null });
+  const [proxyUrl, setProxyUrl] = useState(loadProxyUrl);
+  const [showProxyConfig, setShowProxyConfig] = useState(false);
 
   const t = themes[theme];
   
@@ -783,6 +924,45 @@ export default function JsonToolkit() {
 
   const swap = () => { const tmp = leftJson; setLeftJson(rightJson); setRightJson(tmp); };
 
+  const leftRequestPreview = useMemo(() => (leftRequest.trim() ? parseRequestInput(leftRequest) : null), [leftRequest]);
+  const rightRequestPreview = useMemo(() => (rightRequest.trim() ? parseRequestInput(rightRequest) : null), [rightRequest]);
+
+  // Fetch one side's URL/curl into its diff panel. Each side is independent, so
+  // both can be in flight at once. Everything downstream (format, sort, diff,
+  // revert) works on the text — nothing else knows the value came over the wire.
+  const importRequest = async (side) => {
+    const req = parseRequestInput(side === 'left' ? leftRequest : rightRequest);
+    const note = (msg) => setFetchMsg(prev => ({ ...prev, [side]: msg }));
+
+    if (!req.valid) { note({ type: 'error', text: req.error }); return; }
+
+    setFetching(prev => ({ ...prev, [side]: true }));
+    note(null);
+    const res = await sendRequest(req, proxyUrl);
+    setFetching(prev => ({ ...prev, [side]: false }));
+
+    if (res.failed) { note({ type: 'error', text: res.error }); return; }
+
+    let body = res.text;
+    try { body = toJson(JSON.parse(body)); } catch { /* not JSON — keep raw, YAML still parses */ }
+    (side === 'left' ? setLeftJson : setRightJson)(body);
+
+    const notes = [res.via === 'proxy' ? 'via proxy' : 'direct'];
+    if (req.dropped.length) notes.push(`dropped ${req.dropped.join(', ')}`);
+    note({
+      type: res.ok ? 'ok' : 'warn',
+      text: `${req.method} ${req.url} → ${res.status} ${res.statusText || ''} · ${body.length.toLocaleString()} bytes (${notes.join(', ')})`,
+    });
+  };
+
+  // Fetch both sides at once — the common case when diffing two environments.
+  const importBoth = () => Promise.all([
+    leftRequest.trim() && importRequest('left'),
+    rightRequest.trim() && importRequest('right'),
+  ]);
+
+  const saveProxyUrl = (v) => { setProxyUrl(v); storeProxyUrl(v); };
+
   const format = (side) => {
     const map = { left: [leftParsed, setLeftJson], right: [rightParsed, setRightJson], viz: [vizParsed, setVisualizerJson], conv: [convParsed, setConverterInput] };
     const [p, s] = map[side];
@@ -920,12 +1100,6 @@ export default function JsonToolkit() {
     if (type === 'object') return <span style={{ color: t.bracket }}>{`{${Object.keys(v).length}}`}</span>;
     return String(v);
   };
-
-  const Badge = ({ format }) => (
-    <span style={{ fontSize: 10, padding: '3px 8px', borderRadius: 4, fontWeight: 600, textTransform: 'uppercase', background: format === 'yaml' ? 'rgba(250, 204, 21, 0.15)' : 'rgba(96, 165, 250, 0.15)', color: format === 'yaml' ? '#facc15' : '#60a5fa', border: `1px solid ${format === 'yaml' ? 'rgba(250, 204, 21, 0.3)' : 'rgba(96, 165, 250, 0.3)'}` }}>
-      {format}
-    </span>
-  );
 
   // Tree Node for Diff
   const DiffNode = ({ node, depth = 0 }) => {
@@ -1251,29 +1425,7 @@ export default function JsonToolkit() {
   };
 
   // Input Panel
-  const InputPanel = ({ side, label, color, value, setter, parsed, height = 180 }) => (
-    <div style={{ background: t.bgSecondary, borderRadius: 10, border: `1px solid ${!parsed.valid && value ? t.error + '60' : t.border}`, overflow: 'hidden' }}>
-      <div style={{ padding: '10px 14px', background: t.bgTertiary, borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div style={{ width: 8, height: 8, borderRadius: '50%', background: color, boxShadow: `0 0 6px ${color}` }} />
-          <span style={{ fontSize: 13, fontWeight: 600, color: t.text }}>{label}</span>
-          {parsed.valid && value && parsed.format !== 'unknown' && <Badge format={parsed.format} />}
-          {parsed.valid && value && <span style={{ fontSize: 10, color: t.success, background: t.successLight, padding: '2px 8px', borderRadius: 4 }}>✓</span>}
-          {parsed.wasFixed && <span style={{ fontSize: 10, color: t.warning, background: t.warningLight, padding: '2px 8px', borderRadius: 4 }}>Fixed</span>}
-        </div>
-        <div style={{ display: 'flex', gap: 4 }}>
-          <button onClick={() => format(side)} style={{ padding: '4px 10px', background: t.bgHover, border: 'none', borderRadius: 4, color: t.textSecondary, cursor: 'pointer', fontSize: 11, height: 26, display: 'flex', alignItems: 'center' }}>Format</button>
-          <button onClick={() => minify(side)} style={{ padding: '4px 10px', background: t.bgHover, border: 'none', borderRadius: 4, color: t.textSecondary, cursor: 'pointer', fontSize: 11, height: 26, display: 'flex', alignItems: 'center' }}>Minify</button>
-          <button onClick={() => toJsonFmt(side)} style={{ padding: '4px 10px', background: 'rgba(96, 165, 250, 0.1)', border: 'none', borderRadius: 4, color: '#60a5fa', cursor: 'pointer', fontSize: 11, height: 26, display: 'flex', alignItems: 'center' }}>→JSON</button>
-          <button onClick={() => toYamlFmt(side)} style={{ padding: '4px 10px', background: 'rgba(250, 204, 21, 0.1)', border: 'none', borderRadius: 4, color: '#facc15', cursor: 'pointer', fontSize: 11, height: 26, display: 'flex', alignItems: 'center' }}>→YAML</button>
-          <button onClick={() => sortKeys(side)} style={{ padding: '4px 10px', background: t.bgHover, border: 'none', borderRadius: 4, color: t.textSecondary, cursor: 'pointer', fontSize: 11, height: 26, display: 'flex', alignItems: 'center' }}>Sort</button>
-          <button onClick={() => copy(value, side)} style={{ padding: '4px 10px', background: t.bgHover, border: 'none', borderRadius: 4, color: copied === side ? t.success : t.textSecondary, cursor: 'pointer', fontSize: 11, height: 26, display: 'flex', alignItems: 'center' }}>{copied === side ? '✓' : 'Copy'}</button>
-        </div>
-      </div>
-      <textarea value={value} onChange={e => setter(e.target.value)} placeholder="Paste JSON or YAML here..." style={{ width: '100%', height, padding: 12, background: 'transparent', border: 'none', color: t.text, fontSize: 12, fontFamily: 'monospace', lineHeight: 1.5, resize: 'none', outline: 'none' }} spellCheck={false} />
-      {!parsed.valid && value && <div style={{ padding: '10px 14px', background: t.errorLight, borderTop: `1px solid ${t.error}30`, color: t.error, fontSize: 12 }}>⚠ {parsed.line && `Line ${parsed.line}: `}{parsed.error}</div>}
-    </div>
-  );
+  const panelActions = { format, minify, toJsonFmt, toYamlFmt, sortKeys, copy };
 
   const Btn = ({ children, onClick, active, color }) => (
     <button onClick={onClick} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '12px 20px', background: active ? t.accentLight : 'transparent', border: active ? `2px solid ${t.accent}60` : '2px solid transparent', borderRadius: 10, color: active ? t.accent : color || t.textMuted, cursor: 'pointer', fontSize: 14, fontWeight: 600, transition: 'all 0.2s', minWidth: 90 }}>{children}</button>
@@ -1320,9 +1472,54 @@ export default function JsonToolkit() {
         {/* DIFF TAB */}
         {activeTab === 'diff' && (
           <>
+            {/* Import from a URL or curl command — one field per side */}
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 8, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: t.text }}>🌐 Import from URL or curl</span>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  {leftRequest.trim() && rightRequest.trim() && (
+                    <button onClick={importBoth} disabled={fetching.left || fetching.right} style={{ ...btnStyleAccent, height: 28, fontSize: 12, opacity: fetching.left || fetching.right ? 0.5 : 1 }}>
+                      ↓↓ Fetch Both
+                    </button>
+                  )}
+                  <button onClick={() => setShowProxyConfig(v => !v)} style={{ ...btnStyle, height: 28, fontSize: 12, color: proxyUrl ? t.success : t.textMuted }}>
+                    {proxyUrl ? '✓ Proxy set' : '⚙ Proxy'}
+                  </button>
+                </div>
+              </div>
+
+              {showProxyConfig && (
+                <div style={{ padding: '12px 14px', marginBottom: 8, background: t.bgSecondary, border: `1px solid ${t.border}`, borderRadius: 10 }}>
+                  <input
+                    type="text"
+                    value={proxyUrl}
+                    onChange={e => saveProxyUrl(e.target.value.trim())}
+                    placeholder="https://your-worker.workers.dev  — used only when a direct fetch is blocked"
+                    style={{ width: '100%', padding: '8px 12px', background: t.bgTertiary, border: `1px solid ${t.border}`, borderRadius: 6, color: t.text, fontSize: 12, fontFamily: 'monospace', outline: 'none' }}
+                  />
+                  <p style={{ margin: '8px 0 0', fontSize: 11, color: t.textMuted, lineHeight: 1.5 }}>
+                    Shared by both sides. Deploy <code style={{ color: t.textSecondary }}>proxy/worker.js</code> and paste its URL. Requests go direct first; the proxy is only used when the browser blocks the response. Anything you send through it — including auth tokens — is visible to the proxy, so only use one you control.
+                  </p>
+                </div>
+              )}
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <RequestPanel
+                  t={t} btnStyle={btnStyle} label="Left request" color={t.error}
+                  value={leftRequest} setter={setLeftRequest} preview={leftRequestPreview}
+                  onFetch={() => importRequest('left')} busy={fetching.left} message={fetchMsg.left}
+                />
+                <RequestPanel
+                  t={t} btnStyle={btnStyle} label="Right request" color={t.success}
+                  value={rightRequest} setter={setRightRequest} preview={rightRequestPreview}
+                  onFetch={() => importRequest('right')} busy={fetching.right} message={fetchMsg.right}
+                />
+              </div>
+            </div>
+
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
-              <InputPanel side="left" label="Left (Original)" color={t.error} value={leftJson} setter={setLeftJson} parsed={leftParsed} />
-              <InputPanel side="right" label="Right (Modified)" color={t.success} value={rightJson} setter={setRightJson} parsed={rightParsed} />
+              <InputPanel t={t} actions={panelActions} copied={copied} side="left" label="Left (Original)" color={t.error} value={leftJson} setter={setLeftJson} parsed={leftParsed} />
+              <InputPanel t={t} actions={panelActions} copied={copied} side="right" label="Right (Modified)" color={t.success} value={rightJson} setter={setRightJson} parsed={rightParsed} />
             </div>
 
             {diffTree && stats && (stats.added > 0 || stats.removed > 0 || stats.modified > 0) && (
@@ -1407,7 +1604,7 @@ export default function JsonToolkit() {
               </div>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <InputPanel side="conv" label="Input (JSON or YAML)" color={t.accent} value={converterInput} setter={setConverterInput} parsed={convParsed} height={300} />
+              <InputPanel t={t} actions={panelActions} copied={copied} side="conv" label="Input (JSON or YAML)" color={t.accent} value={converterInput} setter={setConverterInput} parsed={convParsed} height={300} />
               <div style={{ background: t.bgSecondary, borderRadius: 10, border: `1px solid ${t.border}`, overflow: 'hidden' }}>
                 <div style={{ padding: '10px 14px', background: t.bgTertiary, borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1436,7 +1633,7 @@ export default function JsonToolkit() {
               </div>
             </div>
             <div style={{ marginBottom: 14 }}>
-              <InputPanel side="viz" label="JSON or YAML Input" color={t.accent} value={visualizerJson} setter={setVisualizerJson} parsed={vizParsed} height={140} />
+              <InputPanel t={t} actions={panelActions} copied={copied} side="viz" label="JSON or YAML Input" color={t.accent} value={visualizerJson} setter={setVisualizerJson} parsed={vizParsed} height={140} />
             </div>
             {vizParsed.valid && vizParsed.data && (
               <>
@@ -1489,7 +1686,7 @@ export default function JsonToolkit() {
         {/* VALIDATE TAB */}
         {activeTab === 'validate' && (
           <div style={{ maxWidth: 600, margin: '0 auto' }}>
-            <InputPanel side="viz" label="JSON or YAML to Validate" color={t.accent} value={visualizerJson} setter={setVisualizerJson} parsed={vizParsed} height={160} />
+            <InputPanel t={t} actions={panelActions} copied={copied} side="viz" label="JSON or YAML to Validate" color={t.accent} value={visualizerJson} setter={setVisualizerJson} parsed={vizParsed} height={160} />
             <div style={{ marginTop: 16, background: t.bgSecondary, borderRadius: 10, border: `1px solid ${t.border}`, overflow: 'hidden' }}>
               <div style={{ padding: '10px 14px', background: t.bgTertiary, borderBottom: `1px solid ${t.border}` }}>
                 <span style={{ fontSize: 13, fontWeight: 600, color: t.text }}>Validation Result</span>
@@ -1520,7 +1717,7 @@ export default function JsonToolkit() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 18, background: t.errorLight, borderRadius: 10, border: `1px solid ${t.error}30` }}>
                       <div style={{ fontSize: 40 }}>❌</div>
                       <div>
-                        <h4 style={{ margin: 0, color: t.error, fontSize: 16, fontWeight: 600 }}>Invalid {detectFormat(visualizerJson) === 'yaml' ? 'YAML' : 'JSON'}</h4>
+                        <h4 style={{ margin: 0, color: t.error, fontSize: 16, fontWeight: 600 }}>Invalid {{ yaml: 'YAML', json: 'JSON', markup: 'Input' }[detectFormat(visualizerJson)] || 'Input'}</h4>
                         <p style={{ margin: '6px 0 0', color: t.error, fontSize: 13, opacity: 0.8 }}>{vizParsed.error}</p>
                       </div>
                     </div>

@@ -17,6 +17,38 @@ A free, open-source JSON diff checker, validator, and formatter built for develo
 - Search/filter by key path
 - Toggle to show only changes
 
+### 🌐 Import from URL or curl
+- A **separate request field per side**, each with its own Fetch button, status line, and Clear
+- Paste a **URL** or a full **curl command** into either one — responses load into the matching diff panel
+- **Fetch Both** pulls both sides at once; the two requests are independent, so one failing never disturbs the other
+- Supports the flags devtools' "Copy as cURL" emits — `-X`, `-H`, `-d/--data`, `-u`, `--url`, line continuations, both quote styles
+- Everything downstream works unchanged: format, sort, convert, diff, and revert
+- Headers `fetch` is not allowed to set (`Cookie`, `Host`, …) are parsed but reported as dropped rather than silently ignored
+
+**On CORS:** requests go direct first. That works for APIs sending `Access-Control-Allow-Origin`
+(GitHub, most public REST APIs) and is blocked by the browser for everything else — a curl that
+works in your terminal can still fail here. For those, deploy a proxy you control and paste its
+URL under **⚙ Proxy**:
+
+```bash
+# Public APIs — Cloudflare Workers (add your origin to ALLOWED_ORIGINS first)
+npx wrangler deploy proxy/worker.js --name json-toolkit-proxy
+
+# Internal/VPN-only APIs — a Worker has no route to your intranet, so run it locally
+node proxy/local-proxy.mjs          # http://localhost:8787
+```
+
+Both proxies enforce an origin allowlist. The Worker additionally refuses private and
+link-local targets so it can't be used to reach internal services or cloud metadata.
+Anything sent through a proxy — including auth tokens — is visible to it, so only use one you own.
+
+### 📐 YAML handling
+- Parsing and serialisation use [js-yaml](https://github.com/nodeca/js-yaml) — anchors,
+  aliases, block scalars, flow collections and quoted keys all behave per spec
+- Syntax errors report the offending **line number** with surrounding context
+- Input that is neither JSON nor YAML (an HTML error page, say) is identified as such rather
+  than being reported as valid YAML
+
 ### 🔧 Auto-Fix & Validation
 - **Unquoted keys support** — `{ name: "value" }` auto-converts to valid JSON
 - **Single quotes** — `{ 'key': 'value' }` converted to double quotes
@@ -52,6 +84,32 @@ npm run preview
 
 This project auto-deploys to GitHub Pages on every push to `main` branch.
 
+## 🔍 SEO & AI crawler visibility
+
+AI crawlers (GPTBot, ClaudeBot, PerplexityBot, CCBot and the rest) **do not execute
+JavaScript** — they read the HTML the server returns and leave. A client-rendered React app
+is therefore close to invisible to them. To address that, `index.html` carries a static,
+human-readable description of every tool plus a visible FAQ below the app, so a crawler that
+never runs a line of JS still gets ~1,100 words of real content (and the `FAQPage` structured
+data gets the visible counterpart Google requires).
+
+Also included: a linked JSON-LD `@graph` (`WebSite`, `Organization`, `SoftwareApplication`,
+`FAQPage`, two `HowTo` entries), a `public/llms.txt` summary, and a `public/robots.txt` that
+explicitly allows the current AI crawlers.
+
+> ### ⚠️ robots.txt and llms.txt are inert at the current URL
+>
+> Crawlers only read `robots.txt` at the **origin root**. For
+> `https://sreenathch.github.io/json-toolkit/` that is
+> `https://sreenathch.github.io/robots.txt` — which belongs to the `sreenathch.github.io`
+> user-pages repo, not this one, and currently returns **404**. A `robots.txt` served from a
+> subdirectory is never fetched.
+>
+> To make the rules take effect, copy `public/robots.txt` and `public/llms.txt` into the root
+> of the `sreenathch.github.io` repository (adjusting the `Sitemap:` line), or move this
+> project to its own domain. The copies here are correct and ready — they are just served
+> from a path no crawler looks at.
+
 ## 🛠️ Tech Stack
 
 - **React 18** — UI library
@@ -66,6 +124,9 @@ json-toolkit/
 ├── .github/
 │   └── workflows/
 │       └── deploy.yml    # CI/CD pipeline
+├── proxy/
+│   ├── worker.js         # CORS proxy for Cloudflare Workers
+│   └── local-proxy.mjs   # Same, for intranet APIs (Node 18+, no deps)
 ├── src/
 │   ├── App.jsx           # Main component
 │   ├── main.jsx          # Entry point

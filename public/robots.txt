@@ -1,11 +1,111 @@
-# robots.txt for JSON Toolkit
+# robots.txt for JSON/YAML Toolkit
 # https://sreenathch.github.io/json-toolkit/
+#
+# ⚠️  IMPORTANT — THIS FILE IS CURRENTLY INERT.
+#
+# Crawlers only ever read robots.txt at the ORIGIN ROOT. For this site that is
+#     https://sreenathch.github.io/robots.txt
+# which belongs to the `sreenathch.github.io` user-pages repository, NOT to this
+# project repo. A robots.txt served from a subdirectory is never fetched, so the
+# rules below take effect only if you either:
+#   1. copy this file into the root of the `sreenathch.github.io` repo, or
+#   2. move this project onto its own domain or subdomain.
+#
+# The same applies to llms.txt, which by convention also lives at the origin root.
 
 User-agent: *
 Allow: /
 
-# Sitemap location
-Sitemap: https://sreenathch.github.io/json-toolkit/sitemap.xml
+# ---------------------------------------------------------------------------
+# AI assistants and answer engines.
+#
+# All explicitly allowed: this is a free developer tool with no paywalled or
+# proprietary content, so being read and cited by AI assistants is the point.
+# To opt out of model training while staying visible in AI search, change the
+# training crawlers (GPTBot, ClaudeBot, Google-Extended, Applebot-Extended,
+# CCBot, Bytespider, Amazonbot, meta-externalagent) to `Disallow: /` and leave
+# the search and user-triggered fetchers allowed.
+# ---------------------------------------------------------------------------
 
-# Crawl-delay (optional, be nice to servers)
-Crawl-delay: 1
+# OpenAI — GPTBot trains, OAI-SearchBot indexes for ChatGPT search,
+# ChatGPT-User fetches a page because a user asked for it.
+User-agent: GPTBot
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+# Anthropic
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Claude-SearchBot
+Allow: /
+
+User-agent: Claude-User
+Allow: /
+
+User-agent: anthropic-ai
+Allow: /
+
+# Perplexity
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Perplexity-User
+Allow: /
+
+# Google — Googlebot already covers Search and renders JavaScript.
+# Google-Extended is the separate opt-out token for Gemini training.
+User-agent: Google-Extended
+Allow: /
+
+# Apple — Applebot-Extended is the training opt-out token.
+User-agent: Applebot
+Allow: /
+
+User-agent: Applebot-Extended
+Allow: /
+
+# Microsoft / Copilot
+User-agent: bingbot
+Allow: /
+
+# Meta
+User-agent: meta-externalagent
+Allow: /
+
+User-agent: meta-externalfetcher
+Allow: /
+
+# Amazon
+User-agent: Amazonbot
+Allow: /
+
+# Common Crawl — feeds many open datasets and models
+User-agent: CCBot
+Allow: /
+
+# Others
+User-agent: Bytespider
+Allow: /
+
+User-agent: cohere-ai
+Allow: /
+
+User-agent: DuckAssistBot
+Allow: /
+
+User-agent: YouBot
+Allow: /
+
+User-agent: Diffbot
+Allow: /
+
+User-agent: Timpibot
+Allow: /
+
+Sitemap: https://sreenathch.github.io/json-toolkit/sitemap.xml

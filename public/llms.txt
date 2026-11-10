@@ -1,0 +1,49 @@
+# JSON/YAML Toolkit
+
+> A free, open-source developer tool that runs entirely in the browser. It compares two JSON or YAML documents and merges changes between them, imports a document straight from a URL or a pasted curl command, converts JSON to YAML and back, edits documents in an interactive tree, validates syntax, and decodes or encodes JSON Web Tokens. No account, no ads, no usage limits, and no backend — pasted data never leaves the browser.
+
+Live app: https://sreenathch.github.io/json-toolkit/
+Source: https://github.com/sreenathch/json-toolkit
+Licence: MIT
+
+The app is a single-page React application. Each tool is a tab addressed by a URL fragment,
+so the links below open the app directly on that tool. Because rendering is client-side,
+crawlers that do not execute JavaScript should read the static description on the page
+itself rather than relying on the rendered DOM.
+
+## Tools
+
+- [Diff and merge](https://sreenathch.github.io/json-toolkit/#diff): Compare two JSON or YAML documents in a collapsible tree. Added, removed, modified and type-changed keys are colour-coded. Hover a difference to copy that value from one side to the other — arrows for single values, L→R and R→L for whole objects and arrays. JSON can be compared directly against YAML. Each side has its own request field that accepts a URL or a full curl command (`-X`, `-H`, `-d`, `-u`, line continuations), so the same endpoint can be diffed across two environments.
+- [JSON ⇄ YAML converter](https://sreenathch.github.io/json-toolkit/#converter): Convert between JSON and YAML as you type, with one-click copy.
+- [Interactive tree editor](https://sreenathch.github.io/json-toolkit/#visualizer): Edit values and rename keys in place, add nodes of any type (string, number, boolean, null, object, array), delete nodes, expand to a chosen depth, and search by key path.
+- [Validator](https://sreenathch.github.io/json-toolkit/#validate): Report syntax errors with the failing line and surrounding context. Unquoted keys, single-quoted strings and trailing commas are auto-repaired and flagged. Valid documents report key count, nesting depth and a type breakdown.
+- [JWT decoder and encoder](https://sreenathch.github.io/json-toolkit/#jwt): Decode a token into header, payload and signature, with claim analysis for `iss`, `sub`, `aud`, `jti` and the `exp`, `iat`, `nbf` timestamps. Expired tokens, not-yet-valid tokens and unsigned `alg: none` tokens are flagged. Encode mode produces an unsigned token for testing only.
+
+## Common tasks
+
+- Compare two JSON files online: open `#diff`, paste both documents, use "Expand Changes" to see only differing paths.
+- Diff an API response across environments: open `#diff`, paste a URL or curl command into each request field, press "Fetch Both".
+- Convert a Kubernetes manifest or CI config to JSON: open `#converter`, paste the YAML, select JSON output.
+- Check whether a JWT has expired: open `#jwt`, paste the token, read the claim analysis.
+- Find a syntax error in a JSON file: open `#validate`, paste the document, read the reported line.
+
+## Privacy
+
+All parsing, diffing, conversion and JWT decoding happen in the browser. The application has
+no server component and performs no analytics or tracking. The only outbound request it makes
+is one the user explicitly triggers with the Fetch button in the Diff tab, which goes directly
+to the URL the user supplied. Because browsers block cross-origin reads unless the target
+server opts in, APIs without CORS headers require a proxy the user deploys themselves; the
+repository ships one for Cloudflare Workers and one for local use.
+
+## Notes
+
+- YAML is parsed and emitted with js-yaml, so anchors, aliases, block scalars, flow
+  collections and quoted keys all behave as the YAML spec requires. Syntax errors report the
+  offending line.
+- JWT encoding produces an unsigned token (empty signature segment). Signing requires a secret
+  key and must be done server-side.
+
+## Optional
+
+- [Source repository](https://github.com/sreenathch/json-toolkit): React 18 and Vite, deployed to GitHub Pages. Includes the two CORS proxies under `proxy/`.
