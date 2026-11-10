@@ -109,6 +109,36 @@ explicitly allows the current AI crawlers.
 > of the `sreenathch.github.io` repository (adjusting the `Sitemap:` line), or move this
 > project to its own domain. The copies here are correct and ready — they are just served
 > from a path no crawler looks at.
+>
+> Note this does **not** block anything today: every rule in the file is `Allow`, and crawlers
+> treat a missing robots.txt as "crawl freely". What is lost is the `Sitemap:` discovery line
+> and the ability to disallow a crawler later.
+
+### Telling search engines about an update
+
+The old `google.com/ping?sitemap=` and `bing.com/ping?sitemap=` endpoints are dead (404 and
+410 respectively). What works now:
+
+- **Google** — no API without OAuth. Use Search Console: submit the sitemap once, then
+  *URL Inspection → Request Indexing* after a significant content change. Google does not
+  support IndexNow.
+- **Bing, Yandex, Seznam, Naver** — one IndexNow call covers all four. The hex-named `.txt`
+  file in `public/` is the IndexNow key; it must stay reachable or submissions start failing:
+
+  ```bash
+  KEY=$(basename public/[0-9a-f]*.txt .txt)
+  curl -X POST https://api.indexnow.org/indexnow \
+    -H 'Content-Type: application/json' \
+    -d "{\"host\":\"sreenathch.github.io\",\"key\":\"$KEY\",
+         \"keyLocation\":\"https://sreenathch.github.io/json-toolkit/$KEY.txt\",
+         \"urlList\":[\"https://sreenathch.github.io/json-toolkit/\"]}"
+  ```
+
+  `keyLocation` is required because the key sits in a subdirectory rather than the origin
+  root; submitted URLs must start with that path or the API returns 422.
+
+AI crawlers (GPTBot, ClaudeBot, PerplexityBot) have no submission endpoint — they crawl on
+their own schedule and discover pages through links and existing search indexes.
 
 ## 🛠️ Tech Stack
 
