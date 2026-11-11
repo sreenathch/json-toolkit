@@ -1953,6 +1953,8 @@ export default function JsonToolkit() {
       </main>
 
       <footer style={{ padding: '16px 24px', borderTop: `1px solid ${t.border}`, marginTop: 24, textAlign: 'center' }}>
+        {/* The About link lives in the static footer in index.html, not here —
+            it must be in the served HTML for crawlers that do not run JS. */}
         <p style={{ margin: 0, fontSize: 12, color: t.textDim }}>JSON/YAML Toolkit • Built for developers</p>
       </footer>
     </div>

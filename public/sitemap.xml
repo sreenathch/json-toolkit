@@ -1,14 +1,20 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <!--
-    The app is a single page; its tools are URL fragments (#diff, #converter, …)
-    and fragments are not separately indexable, so only the one URL is listed.
-    Splitting the tools into real paths would be the next SEO win.
+    The app itself is a single page; its tools are URL fragments (#diff,
+    #converter, …) and fragments are not separately indexable. about.html
+    carries the prose description and the FAQ.
   -->
   <url>
     <loc>https://sreenathch.github.io/json-toolkit/</loc>
     <lastmod>2026-11-10</lastmod>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
+  </url>
+  <url>
+    <loc>https://sreenathch.github.io/json-toolkit/about.html</loc>
+    <lastmod>2026-11-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
   </url>
 </urlset>

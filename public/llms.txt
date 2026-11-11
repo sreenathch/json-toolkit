@@ -7,9 +7,14 @@ Source: https://github.com/sreenathch/json-toolkit
 Licence: MIT
 
 The app is a single-page React application. Each tool is a tab addressed by a URL fragment,
-so the links below open the app directly on that tool. Because rendering is client-side,
-crawlers that do not execute JavaScript should read the static description on the page
-itself rather than relying on the rendered DOM.
+so the links below open the app directly on that tool. Because rendering is client-side, a
+crawler that does not execute JavaScript will find almost nothing at the app URL — read
+about.html below instead, which is static HTML carrying the full description and FAQ.
+
+## Pages
+
+- [Toolkit](https://sreenathch.github.io/json-toolkit/): the application itself.
+- [About and FAQ](https://sreenathch.github.io/json-toolkit/about.html): prose description of every tool and answers to common questions. This page is static HTML and readable without executing JavaScript.
 
 ## Tools
 

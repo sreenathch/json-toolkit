@@ -88,13 +88,23 @@ This project auto-deploys to GitHub Pages on every push to `main` branch.
 
 AI crawlers (GPTBot, ClaudeBot, PerplexityBot, CCBot and the rest) **do not execute
 JavaScript** — they read the HTML the server returns and leave. A client-rendered React app
-is therefore close to invisible to them. To address that, `index.html` carries a static,
-human-readable description of every tool plus a visible FAQ below the app, so a crawler that
-never runs a line of JS still gets ~1,100 words of real content (and the `FAQPage` structured
-data gets the visible counterpart Google requires).
+is therefore close to invisible to them.
 
-Also included: a linked JSON-LD `@graph` (`WebSite`, `Organization`, `SoftwareApplication`,
-`FAQPage`, two `HowTo` entries), a `public/llms.txt` summary, and a `public/robots.txt` that
+`public/about.html` is the answer: a static page describing every tool, with a visible FAQ,
+carrying ~1,100 words a crawler can read without running a line of JS. It also gives the
+`FAQPage` structured data the visible counterpart Google requires.
+
+It is linked three ways, because each reaches a different consumer:
+
+| Route | Reaches |
+|---|---|
+| Static `<footer>` in `index.html` (outside `#root`) | crawlers that do not run JS — a React-rendered link would be invisible to them |
+| `sitemap.xml` | Google and Bing |
+| `llms.txt` | LLM-facing tooling |
+
+Structured data is split to match where the content actually lives: `WebSite`,
+`Organization` and `SoftwareApplication` stay on the app page; `FAQPage` and the two `HowTo`
+entries moved to `about.html` alongside the prose they describe. `public/robots.txt`
 explicitly allows the current AI crawlers.
 
 > ### ⚠️ robots.txt and llms.txt are inert at the current URL
