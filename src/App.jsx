@@ -609,8 +609,8 @@ const BookmarksPanel = ({
                       <span title={item.request} style={{ flex: '1 1 180px', minWidth: 0, fontSize: 12, color: t.textSecondary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {item.name}
                       </span>
-                      <button title="Load into the left request field" onClick={() => onLoad(item.request, 'left')} style={iconBtn(t, t.error)}>→L</button>
-                      <button title="Load into the right request field" onClick={() => onLoad(item.request, 'right')} style={iconBtn(t, t.success)}>→R</button>
+                      <button title="Load into the left side and fetch" onClick={() => onLoad(item.request, 'left')} style={iconBtn(t, t.error)}>→L</button>
+                      <button title="Load into the right side and fetch" onClick={() => onLoad(item.request, 'right')} style={iconBtn(t, t.success)}>→R</button>
                       <button title="Rename" onClick={() => onStartRename('item', item.id, item.name)} style={iconBtn(t)}>✎</button>
                       {data.folders.length > 1 && (
                         <select
@@ -1142,8 +1142,11 @@ export default function JsonToolkit() {
   // Fetch one side's URL/curl into its diff panel. Each side is independent, so
   // both can be in flight at once. Everything downstream (format, sort, diff,
   // revert) works on the text — nothing else knows the value came over the wire.
-  const importRequest = async (side) => {
-    const req = parseRequestInput(side === 'left' ? leftRequest : rightRequest);
+  // `rawOverride` lets a caller fetch text it already has — loading a bookmark
+  // calls this in the same tick as the setState, so reading the state here
+  // would still see the previous value.
+  const importRequest = async (side, rawOverride) => {
+    const req = parseRequestInput(rawOverride ?? (side === 'left' ? leftRequest : rightRequest));
     const note = (msg) => setFetchMsg(prev => ({ ...prev, [side]: msg }));
 
     if (!req.valid) { note({ type: 'error', text: req.error }); return; }
@@ -1199,11 +1202,13 @@ export default function JsonToolkit() {
     setTimeout(() => setJustSaved(null), 2000);
   };
 
-  // Load a saved request into one side's field. Deliberately does not fetch —
-  // firing a network request off a click labelled "→L" would be a surprise.
+  // Load a saved request into one side's field and fetch it immediately.
+  // The request text is passed straight through rather than read back from
+  // state, which has not re-rendered yet at this point.
   const loadBookmark = (request, side) => {
     (side === 'left' ? setLeftRequest : setRightRequest)(request);
     setFetchMsg(prev => ({ ...prev, [side]: null }));
+    importRequest(side, request);
   };
 
   const addFolder = () => {

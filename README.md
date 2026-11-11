@@ -29,8 +29,8 @@ A free, open-source JSON diff checker, validator, and formatter built for develo
 - Save any request with **☆ Save** on either request field; the name is generated from the
   method and URL and can be renamed inline
 - Organise into **folders** — create, rename, delete, and move requests between them
-- Load a saved request into either side with **→L** / **→R**, then Fetch (loading never fires
-  a request on its own)
+- Load a saved request into either side with **→L** / **→R** — it fills that side's field and
+  fetches straight away
 
 Bookmarks live in `localStorage` under `jsonToolkit.bookmarks` and never leave the browser:
 origin-scoped, never transmitted, no backend involved. A saved curl command retains whatever
