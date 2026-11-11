@@ -25,6 +25,19 @@ A free, open-source JSON diff checker, validator, and formatter built for develo
 - Everything downstream works unchanged: format, sort, convert, diff, and revert
 - Headers `fetch` is not allowed to set (`Cookie`, `Host`, …) are parsed but reported as dropped rather than silently ignored
 
+### ★ Bookmarks
+- Save any request with **☆ Save** on either request field; the name is generated from the
+  method and URL and can be renamed inline
+- Organise into **folders** — create, rename, delete, and move requests between them
+- Load a saved request into either side with **→L** / **→R**, then Fetch (loading never fires
+  a request on its own)
+
+Bookmarks live in `localStorage` under `jsonToolkit.bookmarks` and never leave the browser:
+origin-scoped, never transmitted, no backend involved. A saved curl command retains whatever
+headers you pasted, auth tokens included — it is your own browser storage, but worth knowing
+on a shared machine. Stored data is re-validated on load, so a corrupted or hand-edited key
+falls back to defaults instead of breaking the Diff tab.
+
 **On CORS:** requests go direct first. That works for APIs sending `Access-Control-Allow-Origin`
 (GitHub, most public REST APIs) and is blocked by the browser for everything else — a curl that
 works in your terminal can still fail here. For those, deploy a proxy you control and paste its

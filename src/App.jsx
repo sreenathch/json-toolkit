@@ -449,6 +449,204 @@ const sendRequest = async (req, proxyUrl) => {
   }
 };
 
+// ---------------------------------------------------------------------------
+// Bookmarks — saved requests, grouped into folders.
+//
+// Stored in localStorage only. Nothing is sent anywhere: the data is scoped to
+// this origin, never transmitted, and never read by the app except here.
+// Saved curl commands can contain auth headers, so this is the user's own
+// browser storage and nothing more.
+// ---------------------------------------------------------------------------
+
+const BOOKMARKS_KEY = 'jsonToolkit.bookmarks';
+
+const newId = () => {
+  try { return crypto.randomUUID(); } catch { /* older browsers */ }
+  return `id-${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+};
+
+const defaultBookmarks = () => ({ v: 1, folders: [{ id: newId(), name: 'Saved requests', items: [] }] });
+
+// Hand-written or older payloads could be any shape; coerce to the expected one
+// rather than letting a bad key crash the Diff tab.
+const normaliseBookmarks = (data) => {
+  if (!data || !Array.isArray(data.folders) || data.folders.length === 0) return defaultBookmarks();
+  const folders = data.folders
+    .filter(f => f && typeof f === 'object')
+    .map(f => ({
+      id: typeof f.id === 'string' ? f.id : newId(),
+      name: typeof f.name === 'string' && f.name.trim() ? f.name : 'Untitled folder',
+      items: (Array.isArray(f.items) ? f.items : [])
+        .filter(i => i && typeof i.request === 'string' && i.request.trim())
+        .map(i => ({
+          id: typeof i.id === 'string' ? i.id : newId(),
+          name: typeof i.name === 'string' && i.name.trim() ? i.name : 'Untitled request',
+          request: i.request,
+        })),
+    }));
+  return folders.length ? { v: 1, folders } : defaultBookmarks();
+};
+
+const loadBookmarks = () => {
+  try {
+    const raw = localStorage.getItem(BOOKMARKS_KEY);
+    return raw ? normaliseBookmarks(JSON.parse(raw)) : defaultBookmarks();
+  } catch {
+    return defaultBookmarks();
+  }
+};
+
+const storeBookmarks = (data) => {
+  try { localStorage.setItem(BOOKMARKS_KEY, JSON.stringify(data)); } catch { /* private mode / quota */ }
+};
+
+// "GET api.github.com/repos/facebook/react" — a readable default name
+const suggestBookmarkName = (request) => {
+  const parsed = parseRequestInput(request);
+  if (!parsed.valid) return 'Untitled request';
+  try {
+    const u = new URL(parsed.url);
+    return `${parsed.method} ${u.hostname}${u.pathname.replace(/\/$/, '')}`.slice(0, 70);
+  } catch {
+    return 'Untitled request';
+  }
+};
+
+const iconBtn = (t, color) => ({
+  padding: '2px 7px', background: 'transparent', border: `1px solid ${t.border}`,
+  borderRadius: 4, color: color || t.textMuted, cursor: 'pointer', fontSize: 11, lineHeight: '18px',
+});
+
+const BookmarksPanel = ({
+  t, btnStyle, data, collapsed, editing, draftName, pendingDelete,
+  onToggleFolder, onLoad, onAddFolder, onStartRename, onDraftChange,
+  onCommitRename, onCancelRename, onAskDelete, onConfirmDelete, onMoveItem,
+}) => {
+  const total = data.folders.reduce((n, f) => n + f.items.length, 0);
+
+  return (
+    <div style={{ padding: '12px 14px', marginBottom: 8, background: t.bgSecondary, border: `1px solid ${t.border}`, borderRadius: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, gap: 10, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 12, color: t.textMuted }}>
+          {total === 0
+            ? 'No saved requests yet — use ☆ on a request field to save one.'
+            : `${total} saved request${total === 1 ? '' : 's'} in ${data.folders.length} folder${data.folders.length === 1 ? '' : 's'}`}
+        </span>
+        <button onClick={onAddFolder} style={{ ...btnStyle, height: 26, fontSize: 11 }}>+ New folder</button>
+      </div>
+
+      {data.folders.map(folder => {
+        const isOpen = !collapsed.includes(folder.id);
+        const renamingFolder = editing && editing.kind === 'folder' && editing.id === folder.id;
+        const folderPending = pendingDelete && pendingDelete.kind === 'folder' && pendingDelete.folderId === folder.id;
+
+        return (
+          <div key={folder.id} style={{ borderTop: `1px solid ${t.border}`, paddingTop: 8, marginTop: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              <button
+                onClick={() => onToggleFolder(folder.id)}
+                style={{ background: 'transparent', border: 'none', color: t.textSecondary, cursor: 'pointer', fontSize: 12, padding: '2px 4px' }}
+              >
+                {isOpen ? '▾' : '▸'} 📁
+              </button>
+
+              {renamingFolder ? (
+                <>
+                  <input
+                    autoFocus
+                    value={draftName}
+                    onChange={e => onDraftChange(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') onCommitRename(); if (e.key === 'Escape') onCancelRename(); }}
+                    style={{ flex: '1 1 160px', minWidth: 120, padding: '4px 8px', background: t.bgTertiary, border: `1px solid ${t.accent}60`, borderRadius: 4, color: t.text, fontSize: 12, outline: 'none' }}
+                  />
+                  <button onClick={onCommitRename} style={iconBtn(t, t.success)}>✓</button>
+                  <button onClick={onCancelRename} style={iconBtn(t)}>✕</button>
+                </>
+              ) : (
+                <>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: t.text }}>{folder.name}</span>
+                  <span style={{ fontSize: 11, color: t.textDim }}>({folder.items.length})</span>
+                  <div style={{ flex: 1 }} />
+                  <button title="Rename folder" onClick={() => onStartRename('folder', folder.id, folder.name)} style={iconBtn(t)}>✎</button>
+                  {folderPending ? (
+                    <>
+                      <span style={{ fontSize: 11, color: t.error }}>Delete folder and {folder.items.length} item{folder.items.length === 1 ? '' : 's'}?</span>
+                      <button onClick={onConfirmDelete} style={iconBtn(t, t.error)}>Yes</button>
+                      <button onClick={onCancelRename} style={iconBtn(t)}>No</button>
+                    </>
+                  ) : (
+                    data.folders.length > 1 &&
+                    <button title="Delete folder" onClick={() => onAskDelete('folder', folder.id)} style={iconBtn(t, t.error)}>🗑</button>
+                  )}
+                </>
+              )}
+            </div>
+
+            {isOpen && folder.items.length === 0 && (
+              <p style={{ margin: '6px 0 2px 26px', fontSize: 11, color: t.textDim }}>Empty</p>
+            )}
+
+            {isOpen && folder.items.map(item => {
+              const renamingItem = editing && editing.kind === 'item' && editing.id === item.id;
+              const itemPending = pendingDelete && pendingDelete.kind === 'item' && pendingDelete.itemId === item.id;
+
+              return (
+                <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 0 5px 26px', flexWrap: 'wrap' }}>
+                  {renamingItem ? (
+                    <>
+                      <input
+                        autoFocus
+                        value={draftName}
+                        onChange={e => onDraftChange(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') onCommitRename(); if (e.key === 'Escape') onCancelRename(); }}
+                        style={{ flex: '1 1 200px', minWidth: 140, padding: '4px 8px', background: t.bgTertiary, border: `1px solid ${t.accent}60`, borderRadius: 4, color: t.text, fontSize: 12, outline: 'none' }}
+                      />
+                      <button onClick={onCommitRename} style={iconBtn(t, t.success)}>✓</button>
+                      <button onClick={onCancelRename} style={iconBtn(t)}>✕</button>
+                    </>
+                  ) : (
+                    <>
+                      <span title={item.request} style={{ flex: '1 1 180px', minWidth: 0, fontSize: 12, color: t.textSecondary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {item.name}
+                      </span>
+                      <button title="Load into the left request field" onClick={() => onLoad(item.request, 'left')} style={iconBtn(t, t.error)}>→L</button>
+                      <button title="Load into the right request field" onClick={() => onLoad(item.request, 'right')} style={iconBtn(t, t.success)}>→R</button>
+                      <button title="Rename" onClick={() => onStartRename('item', item.id, item.name)} style={iconBtn(t)}>✎</button>
+                      {data.folders.length > 1 && (
+                        <select
+                          title="Move to folder"
+                          value={folder.id}
+                          onChange={e => onMoveItem(item.id, folder.id, e.target.value)}
+                          style={{ background: t.bgTertiary, border: `1px solid ${t.border}`, borderRadius: 4, color: t.textMuted, fontSize: 11, padding: '2px 4px', maxWidth: 120 }}
+                        >
+                          {data.folders.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+                        </select>
+                      )}
+                      {itemPending ? (
+                        <>
+                          <button onClick={onConfirmDelete} style={iconBtn(t, t.error)}>Delete?</button>
+                          <button onClick={onCancelRename} style={iconBtn(t)}>No</button>
+                        </>
+                      ) : (
+                        <button title="Delete" onClick={() => onAskDelete('item', folder.id, item.id)} style={iconBtn(t, t.error)}>🗑</button>
+                      )}
+                    </>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
+
+      <p style={{ margin: '12px 0 0', fontSize: 11, color: t.textDim, lineHeight: 1.5 }}>
+        Saved in this browser's local storage only — nothing is uploaded, and the data stays on this device.
+        A saved curl command keeps whatever headers you pasted, auth tokens included.
+      </p>
+    </div>
+  );
+};
+
 const Badge = ({ format }) => (
   <span style={{ fontSize: 10, padding: '3px 8px', borderRadius: 4, fontWeight: 600, textTransform: 'uppercase', background: format === 'yaml' ? 'rgba(250, 204, 21, 0.15)' : 'rgba(96, 165, 250, 0.15)', color: format === 'yaml' ? '#facc15' : '#60a5fa', border: `1px solid ${format === 'yaml' ? 'rgba(250, 204, 21, 0.3)' : 'rgba(96, 165, 250, 0.3)'}` }}>
     {format}
@@ -484,7 +682,7 @@ const InputPanel = ({ t, actions, copied, side, label, color, value, setter, par
 
 // One request field per diff side. Module scope for the same reason as
 // InputPanel — nesting it would remount the textarea on every keystroke.
-const RequestPanel = ({ t, btnStyle, label, color, value, setter, preview, onFetch, busy, message }) => (
+const RequestPanel = ({ t, btnStyle, label, color, value, setter, preview, onFetch, busy, message, onSave, saved }) => (
   <div style={{ background: t.bgSecondary, borderRadius: 10, border: `1px solid ${t.border}`, overflow: 'hidden' }}>
     <div style={{ padding: '10px 14px', background: t.bgTertiary, borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
@@ -498,6 +696,11 @@ const RequestPanel = ({ t, btnStyle, label, color, value, setter, preview, onFet
         )}
       </div>
       <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+        {value.trim() && (
+          <button title="Save this request to bookmarks" onClick={onSave} style={{ padding: '4px 10px', background: t.bgHover, border: 'none', borderRadius: 4, color: saved ? t.success : t.textSecondary, cursor: 'pointer', fontSize: 11, height: 26 }}>
+            {saved ? '✓ Saved' : '☆ Save'}
+          </button>
+        )}
         {value && <button onClick={() => setter('')} style={{ padding: '4px 10px', background: t.bgHover, border: 'none', borderRadius: 4, color: t.textSecondary, cursor: 'pointer', fontSize: 11, height: 26 }}>Clear</button>}
         <button onClick={onFetch} disabled={busy} style={{ padding: '4px 12px', background: busy ? t.bgHover : color + '18', border: `1px solid ${color}55`, borderRadius: 4, color: busy ? t.textMuted : color, cursor: busy ? 'wait' : 'pointer', fontSize: 11, fontWeight: 600, height: 26 }}>
           {busy ? '⏳ Fetching…' : '↓ Fetch'}
@@ -571,6 +774,15 @@ export default function JsonToolkit() {
   const [fetchMsg, setFetchMsg] = useState({ left: null, right: null });
   const [proxyUrl, setProxyUrl] = useState(loadProxyUrl);
   const [showProxyConfig, setShowProxyConfig] = useState(false);
+
+  // Bookmarks (Diff tab) — persisted to localStorage, never sent anywhere
+  const [bookmarks, setBookmarks] = useState(loadBookmarks);
+  const [showBookmarks, setShowBookmarks] = useState(false);
+  const [collapsedFolders, setCollapsedFolders] = useState([]);
+  const [editingBookmark, setEditingBookmark] = useState(null);
+  const [draftName, setDraftName] = useState('');
+  const [pendingDelete, setPendingDelete] = useState(null);
+  const [justSaved, setJustSaved] = useState(null);
 
   const t = themes[theme];
   
@@ -962,6 +1174,123 @@ export default function JsonToolkit() {
   ]);
 
   const saveProxyUrl = (v) => { setProxyUrl(v); storeProxyUrl(v); };
+
+  // --- Bookmarks ----------------------------------------------------------
+  // Every mutation goes through here so state and localStorage never diverge.
+  const updateBookmarks = useCallback((mutate) => {
+    setBookmarks(prev => {
+      const next = normaliseBookmarks(mutate(prev));
+      storeBookmarks(next);
+      return next;
+    });
+  }, []);
+
+  const bookmarkRequest = (side) => {
+    const request = (side === 'left' ? leftRequest : rightRequest).trim();
+    if (!request) return;
+    updateBookmarks(prev => {
+      const folders = prev.folders.map((f, i) =>
+        i === 0 ? { ...f, items: [...f.items, { id: newId(), name: suggestBookmarkName(request), request }] } : f
+      );
+      return { ...prev, folders };
+    });
+    setShowBookmarks(true);
+    setJustSaved(side);
+    setTimeout(() => setJustSaved(null), 2000);
+  };
+
+  // Load a saved request into one side's field. Deliberately does not fetch —
+  // firing a network request off a click labelled "→L" would be a surprise.
+  const loadBookmark = (request, side) => {
+    (side === 'left' ? setLeftRequest : setRightRequest)(request);
+    setFetchMsg(prev => ({ ...prev, [side]: null }));
+  };
+
+  const addFolder = () => {
+    const id = newId();
+    updateBookmarks(prev => ({ ...prev, folders: [...prev.folders, { id, name: 'New folder', items: [] }] }));
+    setPendingDelete(null);
+    setEditingBookmark({ kind: 'folder', id });
+    setDraftName('New folder');
+  };
+
+  const startRename = (kind, id, current) => {
+    setPendingDelete(null);
+    setEditingBookmark({ kind, id });
+    setDraftName(current);
+  };
+
+  const commitRename = () => {
+    const name = draftName.trim();
+    const target = editingBookmark;
+    if (!target) return;
+    if (name) {
+      updateBookmarks(prev => ({
+        ...prev,
+        folders: prev.folders.map(f => {
+          if (target.kind === 'folder') return f.id === target.id ? { ...f, name } : f;
+          return { ...f, items: f.items.map(i => (i.id === target.id ? { ...i, name } : i)) };
+        }),
+      }));
+    }
+    setEditingBookmark(null);
+    setDraftName('');
+  };
+
+  // Doubles as the cancel for the inline delete confirmation
+  const cancelBookmarkEdit = () => {
+    setEditingBookmark(null);
+    setDraftName('');
+    setPendingDelete(null);
+  };
+
+  const askDelete = (kind, folderId, itemId) => {
+    setEditingBookmark(null);
+    setPendingDelete({ kind, folderId, itemId });
+  };
+
+  const confirmDelete = () => {
+    const target = pendingDelete;
+    if (!target) return;
+    updateBookmarks(prev => {
+      if (target.kind === 'folder') {
+        const folders = prev.folders.filter(f => f.id !== target.folderId);
+        return { ...prev, folders: folders.length ? folders : prev.folders };
+      }
+      return {
+        ...prev,
+        folders: prev.folders.map(f =>
+          f.id === target.folderId ? { ...f, items: f.items.filter(i => i.id !== target.itemId) } : f
+        ),
+      };
+    });
+    setPendingDelete(null);
+  };
+
+  const moveBookmark = (itemId, fromFolderId, toFolderId) => {
+    if (fromFolderId === toFolderId) return;
+    updateBookmarks(prev => {
+      const from = prev.folders.find(f => f.id === fromFolderId);
+      const item = from && from.items.find(i => i.id === itemId);
+      if (!item) return prev;
+      return {
+        ...prev,
+        folders: prev.folders.map(f => {
+          if (f.id === fromFolderId) return { ...f, items: f.items.filter(i => i.id !== itemId) };
+          if (f.id === toFolderId) return { ...f, items: [...f.items, item] };
+          return f;
+        }),
+      };
+    });
+  };
+
+  const toggleFolder = (id) =>
+    setCollapsedFolders(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]));
+
+  const bookmarkCount = useMemo(
+    () => bookmarks.folders.reduce((n, f) => n + f.items.length, 0),
+    [bookmarks]
+  );
 
   const format = (side) => {
     const map = { left: [leftParsed, setLeftJson], right: [rightParsed, setRightJson], viz: [vizParsed, setVisualizerJson], conv: [convParsed, setConverterInput] };
@@ -1482,6 +1811,9 @@ export default function JsonToolkit() {
                       ↓↓ Fetch Both
                     </button>
                   )}
+                  <button onClick={() => { setShowBookmarks(v => !v); setPendingDelete(null); }} style={{ ...btnStyle, height: 28, fontSize: 12, color: showBookmarks ? t.accent : t.textMuted }}>
+                    ★ Bookmarks{bookmarkCount ? ` (${bookmarkCount})` : ''}
+                  </button>
                   <button onClick={() => setShowProxyConfig(v => !v)} style={{ ...btnStyle, height: 28, fontSize: 12, color: proxyUrl ? t.success : t.textMuted }}>
                     {proxyUrl ? '✓ Proxy set' : '⚙ Proxy'}
                   </button>
@@ -1503,16 +1835,40 @@ export default function JsonToolkit() {
                 </div>
               )}
 
+              {showBookmarks && (
+                <BookmarksPanel
+                  t={t}
+                  btnStyle={btnStyle}
+                  data={bookmarks}
+                  collapsed={collapsedFolders}
+                  editing={editingBookmark}
+                  draftName={draftName}
+                  pendingDelete={pendingDelete}
+                  onToggleFolder={toggleFolder}
+                  onLoad={loadBookmark}
+                  onAddFolder={addFolder}
+                  onStartRename={startRename}
+                  onDraftChange={setDraftName}
+                  onCommitRename={commitRename}
+                  onCancelRename={cancelBookmarkEdit}
+                  onAskDelete={askDelete}
+                  onConfirmDelete={confirmDelete}
+                  onMoveItem={moveBookmark}
+                />
+              )}
+
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <RequestPanel
                   t={t} btnStyle={btnStyle} label="Left request" color={t.error}
                   value={leftRequest} setter={setLeftRequest} preview={leftRequestPreview}
                   onFetch={() => importRequest('left')} busy={fetching.left} message={fetchMsg.left}
+                  onSave={() => bookmarkRequest('left')} saved={justSaved === 'left'}
                 />
                 <RequestPanel
                   t={t} btnStyle={btnStyle} label="Right request" color={t.success}
                   value={rightRequest} setter={setRightRequest} preview={rightRequestPreview}
                   onFetch={() => importRequest('right')} busy={fetching.right} message={fetchMsg.right}
+                  onSave={() => bookmarkRequest('right')} saved={justSaved === 'right'}
                 />
               </div>
             </div>
