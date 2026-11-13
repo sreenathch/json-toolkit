@@ -439,7 +439,13 @@ const storeProxyUrl = (v) => { try { v ? localStorage.setItem(PROXY_KEY, v) : lo
 // surface as "Failed to fetch" — so the fallback covers either case.
 const sendRequest = async (req, proxyUrl) => {
   const attempt = async (via) => {
-    const init = { method: req.method, headers: { ...req.headers }, redirect: 'follow' };
+    // cache: 'no-store' bypasses the browser HTTP cache in both directions, so
+    // pressing Fetch after a deploy returns the new response instead of a
+    // stale one. Deliberately not a ?_=<timestamp> cache-buster (it changes
+    // the URL the user asked for, and breaks signed or strictly-routed
+    // endpoints) and not a Cache-Control request header (a non-simple header
+    // forces a CORS preflight that many APIs do not answer).
+    const init = { method: req.method, headers: { ...req.headers }, redirect: 'follow', cache: 'no-store' };
     if (req.body != null && req.method !== 'GET' && req.method !== 'HEAD') init.body = req.body;
     const target = via === 'proxy'
       ? `${proxyUrl.replace(/\/+$/, '')}/?url=${encodeURIComponent(req.url)}`
@@ -766,16 +772,14 @@ const flattenDiffs = (root) => {
   return out;
 };
 
-// Short, readable rendering of a value for the summary list
-const summariseValue = (v, type) => {
-  if (v === undefined) return '—';
-  if (v === null) return 'null';
-  if (type === 'string') return `"${v.length > 40 ? `${v.slice(0, 40)}…` : v}"`;
-  if (type === 'array') return `[${v.length} item${v.length === 1 ? '' : 's'}]`;
-  if (type === 'object') return `{${Object.keys(v).length} key${Object.keys(v).length === 1 ? '' : 's'}}`;
+// Full text of a value, for filtering and copying — never shortened.
+const valueText = (v, type) => {
+  if (v === undefined || v === null) return '';
+  if (type === 'object' || type === 'array') return JSON.stringify(v);
   return String(v);
 };
 
+// Longest a group's list runs before collapsing behind "Show all N"
 const GROUP_PREVIEW_LIMIT = 25;
 
 const DiffSummary = ({ t, btnStyle, entries, leftLabel, rightLabel, onJump, onCopy, copiedPath }) => {
@@ -783,13 +787,18 @@ const DiffSummary = ({ t, btnStyle, entries, leftLabel, rightLabel, onJump, onCo
   // across renders and the state is not reset on every keystroke elsewhere.
   const [shownInFull, setShownInFull] = useState([]);
   const [filter, setFilter] = useState('');
+  const [expandedValues, setExpandedValues] = useState([]);
+  const toggleValue = (path) =>
+    setExpandedValues(prev => (prev.includes(path) ? prev.filter(x => x !== path) : [...prev, path]));
 
   // Match the key path and both rendered values, so "v2.1" or "price" both work
   const query = filter.trim().toLowerCase();
+  // Match the whole value, not a shortened form — otherwise text past the
+  // preview length would be invisible to the filter.
   const matches = (e) => !query
     || e.path.toLowerCase().includes(query)
-    || summariseValue(e.lv, e.lt).toLowerCase().includes(query)
-    || summariseValue(e.rv, e.rt).toLowerCase().includes(query);
+    || valueText(e.lv, e.lt).toLowerCase().includes(query)
+    || valueText(e.rv, e.rt).toLowerCase().includes(query);
 
   const visible = query ? entries.filter(matches) : entries;
 
@@ -865,19 +874,37 @@ const DiffSummary = ({ t, btnStyle, entries, leftLabel, rightLabel, onJump, onCo
               >
                 {copiedPath === entry.path ? '✓' : '⧉'}
               </button>
-              {entry.status === 'modified' && (
-                <span style={{ fontSize: 11, fontFamily: 'monospace', color: t.textMuted }}>
-                  <span title={String(entry.lv)} style={{ color: t.error }}>{summariseValue(entry.lv, entry.lt)}</span>
-                  {' → '}
-                  <span title={String(entry.rv)} style={{ color: t.success }}>{summariseValue(entry.rv, entry.rt)}</span>
-                </span>
-              )}
+              {entry.status === 'modified' && (() => {
+                // Same renderer as the tree, so values are shown in full and
+                // string changes are highlighted character by character.
+                const segments = entry.lt === 'string' && entry.rt === 'string'
+                  ? diffChars(entry.lv, entry.rv)
+                  : null;
+                const expanded = expandedValues.includes(entry.path);
+                return (
+                  <span style={{ fontSize: 11, fontFamily: 'monospace', color: t.textMuted, flex: '1 1 100%', minWidth: 0 }}>
+                    <DiffValue t={t} value={entry.lv} type={entry.lt} segments={segments} side="left"
+                      expanded={expanded} onToggleExpand={() => toggleValue(entry.path)} />
+                    {' → '}
+                    <DiffValue t={t} value={entry.rv} type={entry.rt} segments={segments} side="right"
+                      expanded={expanded} onToggleExpand={() => toggleValue(entry.path)} />
+                  </span>
+                );
+              })()}
               {entry.status === 'type_changed' && (
                 <span style={{ fontSize: 11, fontFamily: 'monospace', color: t.textMuted }}>{entry.lt} → {entry.rt}</span>
               )}
               {(entry.status === 'added' || entry.status === 'removed') && (
-                <span style={{ fontSize: 11, fontFamily: 'monospace', color: t.textMuted }}>
-                  {summariseValue(entry.status === 'added' ? entry.rv : entry.lv, entry.status === 'added' ? entry.rt : entry.lt)}
+                <span style={{ fontSize: 11, fontFamily: 'monospace', color: t.textMuted, flex: '1 1 100%', minWidth: 0 }}>
+                  <DiffValue
+                    t={t}
+                    value={entry.status === 'added' ? entry.rv : entry.lv}
+                    type={entry.status === 'added' ? entry.rt : entry.lt}
+                    segments={null}
+                    side={entry.status === 'added' ? 'right' : 'left'}
+                    expanded={expandedValues.includes(entry.path)}
+                    onToggleExpand={() => toggleValue(entry.path)}
+                  />
                 </span>
               )}
             </div>

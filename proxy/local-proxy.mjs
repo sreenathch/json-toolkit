@@ -89,9 +89,10 @@ const server = createServer(async (req, res) => {
       headers,
       body: hasBody ? await readBody(req) : undefined,
       redirect: 'follow',
+      cache: 'no-store',
     });
 
-    const out = { ...corsHeaders(origin, req), 'X-Proxied-By': 'json-toolkit-local-proxy' };
+    const out = { ...corsHeaders(origin, req), 'X-Proxied-By': 'json-toolkit-local-proxy', 'Cache-Control': 'no-store' };
     const contentType = upstream.headers.get('content-type');
     if (contentType) out['Content-Type'] = contentType;
 

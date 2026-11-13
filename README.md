@@ -16,6 +16,9 @@ A free, open-source JSON diff checker, validator, and formatter built for develo
 - Values render **in full**, wrapped rather than ellipsed; anything over 400 characters
   collapses behind a **Show all N** toggle instead of being silently cut
 - **⧉ copy buttons on hover** for the key path and for each side's value independently
+
+Values are shown in full in the summary too, with the same character highlighting — nothing
+is ellipsed anywhere.
 - Visual hierarchy with expandable/collapsible nodes
 - Side-by-side value comparison with arrows
 - Color-coded changes (added, removed, modified, type changed)
@@ -68,6 +71,13 @@ origin-scoped, never transmitted, no backend involved. A saved curl command reta
 headers you pasted, auth tokens included — it is your own browser storage, but worth knowing
 on a shared machine. Stored data is re-validated on load, so a corrupted or hand-edited key
 falls back to defaults instead of breaking the Diff tab.
+
+**Fetching is always fresh.** Requests use `cache: 'no-store'`, so pressing Fetch after a
+deploy returns the new response rather than a cached one. Both proxies do the same upstream
+and send `Cache-Control: no-store` back. No `?_=<timestamp>` cache-buster is appended — that
+changes the URL you asked for and breaks signed or strictly-routed endpoints — and no
+`Cache-Control` request header is set, since a non-simple header forces a CORS preflight many
+APIs will not answer.
 
 **On CORS:** requests go direct first. That works for APIs sending `Access-Control-Allow-Origin`
 (GitHub, most public REST APIs) and is blocked by the browser for everything else — a curl that

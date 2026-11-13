@@ -116,6 +116,7 @@ export default {
         headers,
         body: hasBody ? await request.arrayBuffer() : undefined,
         redirect: 'follow',
+        cache: 'no-store',
       });
     } catch (err) {
       return fail(`Upstream request failed: ${err.message}`, 502, origin, request);
@@ -125,6 +126,8 @@ export default {
     out.delete('set-cookie'); // never relay credentials back into the page
     for (const [k, v] of Object.entries(corsHeaders(origin, request))) out.set(k, v);
     out.set('X-Proxied-By', 'json-toolkit-proxy');
+    // The point of the toolkit is seeing what an endpoint returns *now*
+    out.set('Cache-Control', 'no-store');
 
     return new Response(upstream.body, {
       status: upstream.status,
