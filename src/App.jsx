@@ -647,6 +647,134 @@ const BookmarksPanel = ({
   );
 };
 
+// ---------------------------------------------------------------------------
+// Difference summary — a plain-language account of what actually differs,
+// with every differing path listed and addressable.
+// ---------------------------------------------------------------------------
+
+// Collapse the diff tree into one entry per meaningful change. A subtree that
+// was added or removed wholesale is reported at its root rather than once per
+// descendant, which would bury the real finding under its own children.
+const flattenDiffs = (root) => {
+  const out = [];
+  const walk = (node, ancestors) => {
+    if (!node || node.status === 'unchanged') return;
+    if (node.status === 'added' || node.status === 'removed' || node.status === 'type_changed' || node.children.length === 0) {
+      out.push({
+        path: node.path,
+        key: String(node.key),
+        status: node.status,
+        lv: node.lv,
+        rv: node.rv,
+        lt: node.lt,
+        rt: node.rt,
+        ancestors,
+      });
+      return;
+    }
+    node.children.forEach(child => walk(child, [...ancestors, node.path]));
+  };
+  walk(root, []);
+  return out;
+};
+
+// Short, readable rendering of a value for the summary list
+const summariseValue = (v, type) => {
+  if (v === undefined) return '—';
+  if (v === null) return 'null';
+  if (type === 'string') return `"${v.length > 40 ? `${v.slice(0, 40)}…` : v}"`;
+  if (type === 'array') return `[${v.length} item${v.length === 1 ? '' : 's'}]`;
+  if (type === 'object') return `{${Object.keys(v).length} key${Object.keys(v).length === 1 ? '' : 's'}}`;
+  return String(v);
+};
+
+const GROUP_PREVIEW_LIMIT = 25;
+
+const DiffSummary = ({ t, btnStyle, entries, leftLabel, rightLabel, onJump, onCopy, copiedPath }) => {
+  // Safe here: this component lives at module scope, so its identity is stable
+  // across renders and the state is not reset on every keystroke elsewhere.
+  const [shownInFull, setShownInFull] = useState([]);
+  const groups = [
+    { id: 'removed', title: `Only in ${leftLabel}`, hint: 'present on the left, missing on the right', color: t.error },
+    { id: 'added', title: `Only in ${rightLabel}`, hint: 'present on the right, missing on the left', color: t.success },
+    { id: 'modified', title: 'Different values', hint: 'same key on both sides, different value', color: t.warning },
+    { id: 'type_changed', title: 'Different types', hint: 'same key, but the kind of value changed', color: t.accent },
+  ].map(g => ({ ...g, items: entries.filter(e => e.status === g.id) })).filter(g => g.items.length);
+
+  const sentence = groups
+    .map(g => `${g.items.length} ${g.id === 'removed' ? `only in ${leftLabel}`
+      : g.id === 'added' ? `only in ${rightLabel}`
+      : g.id === 'modified' ? 'with a different value' : 'with a different type'}`)
+    .join(', ');
+
+  return (
+    <div style={{ background: t.bgSecondary, border: `1px solid ${t.border}`, borderRadius: 10, padding: '14px 16px', marginBottom: 14 }}>
+      <p style={{ margin: '0 0 4px', fontSize: 13, color: t.text, lineHeight: 1.6 }}>
+        <strong style={{ color: t.error }}>{leftLabel}</strong> and <strong style={{ color: t.success }}>{rightLabel}</strong>{' '}
+        differ at <strong style={{ color: t.accent }}>{entries.length}</strong> path{entries.length === 1 ? '' : 's'}: {sentence}.
+      </p>
+      <p style={{ margin: '0 0 12px', fontSize: 11, color: t.textDim }}>
+        Click a path to jump to it in the tree below, or use ⧉ to copy it.
+      </p>
+
+      {groups.map(group => (
+        <div key={group.id} style={{ marginTop: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+            <div style={{ width: 8, height: 8, borderRadius: 2, background: group.color }} />
+            <span style={{ fontSize: 12, fontWeight: 600, color: group.color }}>{group.title}</span>
+            <span style={{ fontSize: 11, color: t.textDim }}>({group.items.length}) — {group.hint}</span>
+          </div>
+
+          {(shownInFull.includes(group.id) ? group.items : group.items.slice(0, GROUP_PREVIEW_LIMIT)).map(entry => (
+            <div key={entry.path} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0 3px 16px', flexWrap: 'wrap' }}>
+              <button
+                onClick={() => onJump(entry)}
+                title="Jump to this key in the tree"
+                style={{ background: 'transparent', border: 'none', padding: 0, color: t.textSecondary, cursor: 'pointer', fontSize: 12, fontFamily: 'monospace', textDecoration: 'underline', textDecorationStyle: 'dotted' }}
+              >
+                {entry.path}
+              </button>
+              <button
+                onClick={() => onCopy(entry.path)}
+                title="Copy this path"
+                style={{ ...btnStyle, height: 20, padding: '0 7px', fontSize: 10, color: copiedPath === entry.path ? t.success : t.textMuted }}
+              >
+                {copiedPath === entry.path ? '✓' : '⧉'}
+              </button>
+              {entry.status === 'modified' && (
+                <span style={{ fontSize: 11, fontFamily: 'monospace', color: t.textMuted }}>
+                  <span style={{ color: t.error }}>{summariseValue(entry.lv, entry.lt)}</span>
+                  {' → '}
+                  <span style={{ color: t.success }}>{summariseValue(entry.rv, entry.rt)}</span>
+                </span>
+              )}
+              {entry.status === 'type_changed' && (
+                <span style={{ fontSize: 11, fontFamily: 'monospace', color: t.textMuted }}>{entry.lt} → {entry.rt}</span>
+              )}
+              {(entry.status === 'added' || entry.status === 'removed') && (
+                <span style={{ fontSize: 11, fontFamily: 'monospace', color: t.textMuted }}>
+                  {summariseValue(entry.status === 'added' ? entry.rv : entry.lv, entry.status === 'added' ? entry.rt : entry.lt)}
+                </span>
+              )}
+            </div>
+          ))}
+
+          {group.items.length > GROUP_PREVIEW_LIMIT && (
+            <button
+              onClick={() => setShownInFull(prev => prev.includes(group.id) ? prev.filter(g => g !== group.id) : [...prev, group.id])}
+              style={{ ...btnStyle, height: 22, marginLeft: 16, marginTop: 4, fontSize: 11 }}
+            >
+              {shownInFull.includes(group.id)
+                ? `Show first ${GROUP_PREVIEW_LIMIT}`
+                : `Show all ${group.items.length}`}
+            </button>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+};
+
 const Badge = ({ format }) => (
   <span style={{ fontSize: 10, padding: '3px 8px', borderRadius: 4, fontWeight: 600, textTransform: 'uppercase', background: format === 'yaml' ? 'rgba(250, 204, 21, 0.15)' : 'rgba(96, 165, 250, 0.15)', color: format === 'yaml' ? '#facc15' : '#60a5fa', border: `1px solid ${format === 'yaml' ? 'rgba(250, 204, 21, 0.3)' : 'rgba(96, 165, 250, 0.3)'}` }}>
     {format}
@@ -1297,6 +1425,46 @@ export default function JsonToolkit() {
     [bookmarks]
   );
 
+  // --- Difference summary -------------------------------------------------
+  const diffEntries = useMemo(() => (diffTree ? flattenDiffs(diffTree) : []), [diffTree]);
+
+  // Name each side by where its data came from, falling back to the panel label
+  const sideLabel = useCallback((side) => {
+    const raw = side === 'left' ? leftRequest : rightRequest;
+    if (raw.trim()) {
+      const parsed = parseRequestInput(raw);
+      if (parsed.valid) {
+        try {
+          const u = new URL(parsed.url);
+          return `${u.hostname}${u.pathname.replace(/\/$/, '')}`;
+        } catch { /* fall through to the generic label */ }
+      }
+    }
+    return side === 'left' ? 'Left (Original)' : 'Right (Modified)';
+  }, [leftRequest, rightRequest]);
+
+  // Expand every ancestor so the target row exists, then scroll to it. The
+  // scroll waits a frame because the rows only mount on the next render.
+  const jumpToPath = (entry) => {
+    setExpandedNodes(prev => new Set([...prev, ...entry.ancestors, entry.path]));
+    setSearchTerm('');
+    setShowOnlyDiffs(false);
+    requestAnimationFrame(() => {
+      const row = document.querySelector(`[data-diff-path="${CSS.escape(entry.path)}"]`);
+      if (!row) return;
+      row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      row.style.transition = 'outline-color 1.2s ease';
+      row.style.outline = `2px solid ${t.accent}`;
+      setTimeout(() => { row.style.outlineColor = 'transparent'; }, 180);
+    });
+  };
+
+  const copyPath = (path) => {
+    navigator.clipboard.writeText(path);
+    setCopied(path);
+    setTimeout(() => setCopied(null), 1500);
+  };
+
   const format = (side) => {
     const map = { left: [leftParsed, setLeftJson], right: [rightParsed, setRightJson], viz: [vizParsed, setVisualizerJson], conv: [convParsed, setConverterInput] };
     const [p, s] = map[side];
@@ -1457,6 +1625,7 @@ export default function JsonToolkit() {
     return (
       <div style={{ marginLeft: depth > 0 ? 18 : 0 }}>
         <div 
+          data-diff-path={node.path}
           onClick={() => hasKids && toggle(node.path, setExpandedNodes)} 
           onMouseEnter={() => setIsHovered(true)}
           onMouseLeave={() => setIsHovered(false)}
@@ -1896,6 +2065,19 @@ export default function JsonToolkit() {
                   </div>
                 ))}
               </div>
+            )}
+
+            {diffEntries.length > 0 && (
+              <DiffSummary
+                t={t}
+                btnStyle={btnStyle}
+                entries={diffEntries}
+                leftLabel={sideLabel('left')}
+                rightLabel={sideLabel('right')}
+                onJump={jumpToPath}
+                onCopy={copyPath}
+                copiedPath={copied}
+              />
             )}
 
             {diffTree && (

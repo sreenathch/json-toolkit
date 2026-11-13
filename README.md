@@ -17,6 +17,22 @@ A free, open-source JSON diff checker, validator, and formatter built for develo
 - Search/filter by key path
 - Toggle to show only changes
 
+### 📋 Difference summary
+Above the tree, a plain-language account of what actually differs:
+
+> **api.github.com/repos/facebook/react** and **api.github.com/repos/vuejs/core** differ at
+> **101** paths: 6 only in api.github.com/repos/facebook/react, 95 with a different value.
+
+- Each side is named by where its data came from (the fetched URL), falling back to
+  "Left (Original)" / "Right (Modified)" for pasted documents
+- Differences are grouped into **only in left**, **only in right**, **different values** and
+  **different types**, each with its count and a one-line explanation
+- Every differing key is listed by JSON path — click it to expand the tree to that node and
+  scroll to it, or **⧉** to copy the path
+- A subtree added or removed wholesale is reported at its root, not once per descendant
+- Groups longer than 25 entries collapse behind **Show all N**, so a large API diff does not
+  become its own wall of text
+
 ### 🌐 Import from URL or curl
 - A **separate request field per side**, each with its own Fetch button, status line, and Clear
 - Paste a **URL** or a full **curl command** into either one — responses load into the matching diff panel
