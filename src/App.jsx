@@ -1604,6 +1604,26 @@ export default function JsonToolkit() {
   // --- Difference summary -------------------------------------------------
   const diffEntries = useMemo(() => (diffTree ? flattenDiffs(diffTree) : []), [diffTree]);
 
+  // Paths to keep while the tree search is active: every node whose path
+  // matches, plus all of their ancestors so the matches stay reachable.
+  // The previous check only looked one level down, so a match nested deeper
+  // than a node's immediate children removed that node — and searching for a
+  // leaf like "theme" emptied the whole tree.
+  const searchMatches = useMemo(() => {
+    const q = searchTerm.trim().toLowerCase();
+    if (!q || !diffTree) return null;
+    const keep = new Set();
+    const walk = (node, ancestors) => {
+      let any = node.path.toLowerCase().includes(q);
+      const next = [...ancestors, node.path];
+      node.children.forEach(child => { if (walk(child, next)) any = true; });
+      if (any) { keep.add(node.path); ancestors.forEach(a => keep.add(a)); }
+      return any;
+    };
+    walk(diffTree, []);
+    return keep;
+  }, [diffTree, searchTerm]);
+
   // Name each side by where its data came from, falling back to the panel label
   const sideLabel = useCallback(
     (side) => sideSource[side] || (side === 'left' ? 'Left (Original)' : 'Right (Modified)'),
@@ -1775,15 +1795,12 @@ export default function JsonToolkit() {
     const [isHovered, setIsHovered] = useState(false);
     
     if (!node) return null;
-    const exp = expandedNodes.has(node.path);
+    const exp = expandedNodes.has(node.path) || (searchMatches !== null && searchMatches.has(node.path));
     const hasKids = node.children.length > 0;
     const cfg = statusCfg[node.status];
     const isLeaf = !hasKids || node.status === 'type_changed';
 
-    if (searchTerm && !node.path.toLowerCase().includes(searchTerm.toLowerCase())) {
-      const match = node.children.some(c => c.path.toLowerCase().includes(searchTerm.toLowerCase()));
-      if (!match) return null;
-    }
+    if (searchMatches && !searchMatches.has(node.path)) return null;
     if (showOnlyDiffs && node.status === 'unchanged' && !node.children.some(c => c.status !== 'unchanged')) return null;
 
     // Revert button style - consistent with other buttons
