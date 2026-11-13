@@ -18,7 +18,7 @@ A free, open-source JSON diff checker, validator, and formatter built for develo
 - Toggle to show only changes
 
 ### 📋 Difference summary
-Above the tree, a plain-language account of what actually differs:
+Below the tree, a plain-language account of what actually differs:
 
 > **api.github.com/repos/facebook/react** and **api.github.com/repos/vuejs/core** differ at
 > **101** paths: 6 only in api.github.com/repos/facebook/react, 95 with a different value.
@@ -29,6 +29,7 @@ Above the tree, a plain-language account of what actually differs:
   **different types**, each with its count and a one-line explanation
 - Every differing key is listed by JSON path — click it to expand the tree to that node and
   scroll to it, or **⧉** to copy the path
+- Each row in the diff tree also carries a **⧉** on hover that copies that key's path
 - A subtree added or removed wholesale is reported at its root, not once per descendant
 - Groups longer than 25 entries collapse behind **Show all N**, so a large API diff does not
   become its own wall of text
@@ -47,6 +48,8 @@ Above the tree, a plain-language account of what actually differs:
 - Organise into **folders** — create, rename, delete, and move requests between them
 - Load a saved request into either side with **→L** / **→R** — it fills that side's field and
   fetches straight away
+- **⇪ Export** downloads bookmarks, theme and proxy URL as one JSON file; **⇩ Import** restores
+  them. Import validates the file and shows what it will replace before touching anything
 
 Bookmarks live in `localStorage` under `jsonToolkit.bookmarks` and never leave the browser:
 origin-scoped, never transmitted, no backend involved. A saved curl command retains whatever
@@ -83,6 +86,10 @@ Anything sent through a proxy — including auth tokens — is visible to it, so
 - **Single quotes** — `{ 'key': 'value' }` converted to double quotes
 - **Trailing commas** — automatically removed
 - **Line-by-line error reporting** with code preview
+
+### 🎨 Theme
+- Dark and light, remembered in `localStorage` across visits
+- With no stored choice yet, the OS `prefers-color-scheme` setting decides
 
 ### 📏 Utilities
 - **Format** — Pretty print with 2-space indentation

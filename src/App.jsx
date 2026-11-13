@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import * as yaml from 'js-yaml';
 
 // YAML parsing and serialisation are delegated to js-yaml.
@@ -417,6 +417,19 @@ const parseRequestInput = (raw) => {
   return finish(req);
 };
 
+const THEME_KEY = 'jsonToolkit.theme';
+const loadTheme = () => {
+  try {
+    const saved = localStorage.getItem(THEME_KEY);
+    if (saved === 'dark' || saved === 'light') return saved;
+    // No stored choice yet — follow the OS preference rather than forcing dark
+    return window.matchMedia?.('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  } catch {
+    return 'dark';
+  }
+};
+const storeTheme = (v) => { try { localStorage.setItem(THEME_KEY, v); } catch { /* private mode */ } };
+
 const PROXY_KEY = 'jsonToolkit.proxyUrl';
 const loadProxyUrl = () => { try { return localStorage.getItem(PROXY_KEY) || ''; } catch { return ''; } };
 const storeProxyUrl = (v) => { try { v ? localStorage.setItem(PROXY_KEY, v) : localStorage.removeItem(PROXY_KEY); } catch { /* private mode */ } };
@@ -500,6 +513,42 @@ const storeBookmarks = (data) => {
   try { localStorage.setItem(BOOKMARKS_KEY, JSON.stringify(data)); } catch { /* private mode / quota */ }
 };
 
+const SETTINGS_FILE_VERSION = 1;
+
+// Everything the app persists, in one portable file. Stays local: this builds
+// a Blob and hands it to the browser's own download — nothing is uploaded.
+const buildSettingsExport = ({ bookmarks, theme, proxyUrl }) => ({
+  app: 'json-yaml-toolkit',
+  version: SETTINGS_FILE_VERSION,
+  exportedAt: new Date().toISOString(),
+  theme,
+  proxyUrl,
+  bookmarks,
+});
+
+// A file picked off disk is untrusted input — validate rather than assume.
+const parseSettingsImport = (text) => {
+  let data;
+  try { data = JSON.parse(text); } catch { return { ok: false, error: 'That file is not valid JSON' }; }
+  if (!data || typeof data !== 'object') return { ok: false, error: 'That file does not contain a settings object' };
+  if (data.app && data.app !== 'json-yaml-toolkit') return { ok: false, error: `That file came from "${data.app}", not this tool` };
+  if (!data.bookmarks && !data.theme) return { ok: false, error: 'No bookmarks or theme found in that file' };
+
+  const bookmarks = data.bookmarks ? normaliseBookmarks(data.bookmarks) : null;
+  const theme = data.theme === 'dark' || data.theme === 'light' ? data.theme : null;
+  const proxyUrl = typeof data.proxyUrl === 'string' ? data.proxyUrl : null;
+
+  return {
+    ok: true,
+    bookmarks,
+    theme,
+    proxyUrl,
+    counts: bookmarks
+      ? { folders: bookmarks.folders.length, items: bookmarks.folders.reduce((n, f) => n + f.items.length, 0) }
+      : null,
+  };
+};
+
 // "GET api.github.com/repos/facebook/react" — a readable default name
 const suggestBookmarkName = (request) => {
   const parsed = parseRequestInput(request);
@@ -521,6 +570,7 @@ const BookmarksPanel = ({
   t, btnStyle, data, collapsed, editing, draftName, pendingDelete,
   onToggleFolder, onLoad, onAddFolder, onStartRename, onDraftChange,
   onCommitRename, onCancelRename, onAskDelete, onConfirmDelete, onMoveItem,
+  onExport, onImportFile, importState, onConfirmImport, onCancelImport,
 }) => {
   const total = data.folders.reduce((n, f) => n + f.items.length, 0);
 
@@ -532,8 +582,46 @@ const BookmarksPanel = ({
             ? 'No saved requests yet — use ☆ on a request field to save one.'
             : `${total} saved request${total === 1 ? '' : 's'} in ${data.folders.length} folder${data.folders.length === 1 ? '' : 's'}`}
         </span>
-        <button onClick={onAddFolder} style={{ ...btnStyle, height: 26, fontSize: 11 }}>+ New folder</button>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <button onClick={onAddFolder} style={{ ...btnStyle, height: 26, fontSize: 11 }}>+ New folder</button>
+          <button onClick={onExport} title="Download bookmarks and settings as a file" style={{ ...btnStyle, height: 26, fontSize: 11 }}>⇪ Export</button>
+          <label style={{ ...btnStyle, height: 26, fontSize: 11, cursor: 'pointer' }}>
+            ⇩ Import
+            <input
+              type="file"
+              accept="application/json,.json"
+              onChange={onImportFile}
+              style={{ display: 'none' }}
+            />
+          </label>
+        </div>
       </div>
+
+      {importState && (
+        <div style={{
+          padding: '10px 12px', marginBottom: 10, borderRadius: 8, fontSize: 12, lineHeight: 1.6,
+          background: importState.error ? t.errorLight : t.accentLight,
+          color: importState.error ? t.error : t.text,
+          border: `1px solid ${importState.error ? t.error : t.accent}40`,
+        }}>
+          {importState.error ? (
+            <>✗ {importState.error}</>
+          ) : (
+            <>
+              <div style={{ marginBottom: 8 }}>
+                Import <strong>{importState.counts ? `${importState.counts.items} request${importState.counts.items === 1 ? '' : 's'} in ${importState.counts.folders} folder${importState.counts.folders === 1 ? '' : 's'}` : 'settings'}</strong>
+                {importState.theme ? `, theme "${importState.theme}"` : ''}
+                {importState.proxyUrl ? ', and a proxy URL' : ''}?
+                {importState.counts && ' This replaces the bookmarks you have now.'}
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button onClick={onConfirmImport} style={{ ...btnStyle, height: 24, fontSize: 11, color: t.success }}>Replace</button>
+                <button onClick={onCancelImport} style={{ ...btnStyle, height: 24, fontSize: 11 }}>Cancel</button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {data.folders.map(folder => {
         const isOpen = !collapsed.includes(folder.id);
@@ -708,7 +796,7 @@ const DiffSummary = ({ t, btnStyle, entries, leftLabel, rightLabel, onJump, onCo
     .join(', ');
 
   return (
-    <div style={{ background: t.bgSecondary, border: `1px solid ${t.border}`, borderRadius: 10, padding: '14px 16px', marginBottom: 14 }}>
+    <div style={{ background: t.bgSecondary, border: `1px solid ${t.border}`, borderRadius: 10, padding: '14px 16px', marginTop: 14 }}>
       <p style={{ margin: '0 0 4px', fontSize: 13, color: t.text, lineHeight: 1.6 }}>
         <strong style={{ color: t.error }}>{leftLabel}</strong> and <strong style={{ color: t.success }}>{rightLabel}</strong>{' '}
         differ at <strong style={{ color: t.accent }}>{entries.length}</strong> path{entries.length === 1 ? '' : 's'}: {sentence}.
@@ -863,7 +951,7 @@ const RequestPanel = ({ t, btnStyle, label, color, value, setter, preview, onFet
 );
 
 export default function JsonToolkit() {
-  const [theme, setTheme] = useState('dark');
+  const [theme, setTheme] = useState(loadTheme);
   const [leftJson, setLeftJson] = useState('');
   const [rightJson, setRightJson] = useState('');
   const [visualizerJson, setVisualizerJson] = useState('');
@@ -911,6 +999,10 @@ export default function JsonToolkit() {
   const [draftName, setDraftName] = useState('');
   const [pendingDelete, setPendingDelete] = useState(null);
   const [justSaved, setJustSaved] = useState(null);
+  // Where each diff panel's content actually came from. Set on a successful
+  // fetch, cleared whenever the panel is filled by any other means — the
+  // request field alone is not evidence that the panel holds that response.
+  const [sideSource, setSideSource] = useState({ left: null, right: null });
 
   const t = themes[theme];
   
@@ -1252,17 +1344,22 @@ export default function JsonToolkit() {
     if (activeTab === 'converter') setConverterInput(sampleJson.yaml);
     else if (activeTab === 'visualizer' || activeTab === 'validate') setVisualizerJson(sampleJson.visualizer);
     else if (activeTab === 'jwt') setJwtInput(sampleJson.jwt);
-    else { setLeftJson(sampleJson.left); setRightJson(sampleJson.right); }
+    else { setLeftJson(sampleJson.left); setRightJson(sampleJson.right); setSideSource({ left: null, right: null }); }
   };
 
   const clear = () => {
     if (activeTab === 'converter') { setConverterInput(''); setConverterOutput(''); }
     else if (activeTab === 'visualizer' || activeTab === 'validate') setVisualizerJson('');
     else if (activeTab === 'jwt') { setJwtInput(''); setJwtHeader('{\n  "alg": "HS256",\n  "typ": "JWT"\n}'); setJwtPayload('{\n  "sub": "1234567890",\n  "name": "John Doe",\n  "iat": 1516239022\n}'); }
-    else { setLeftJson(''); setRightJson(''); }
+    else { setLeftJson(''); setRightJson(''); setSideSource({ left: null, right: null }); }
   };
 
-  const swap = () => { const tmp = leftJson; setLeftJson(rightJson); setRightJson(tmp); };
+  const swap = () => {
+    const tmp = leftJson;
+    setLeftJson(rightJson);
+    setRightJson(tmp);
+    setSideSource(prev => ({ left: prev.right, right: prev.left }));
+  };
 
   const leftRequestPreview = useMemo(() => (leftRequest.trim() ? parseRequestInput(leftRequest) : null), [leftRequest]);
   const rightRequestPreview = useMemo(() => (rightRequest.trim() ? parseRequestInput(rightRequest) : null), [rightRequest]);
@@ -1289,6 +1386,13 @@ export default function JsonToolkit() {
     let body = res.text;
     try { body = toJson(JSON.parse(body)); } catch { /* not JSON — keep raw, YAML still parses */ }
     (side === 'left' ? setLeftJson : setRightJson)(body);
+
+    let sourceLabel = req.url;
+    try {
+      const u = new URL(req.url);
+      sourceLabel = `${u.hostname}${u.pathname.replace(/\/$/, '')}`;
+    } catch { /* keep the raw url */ }
+    setSideSource(prev => ({ ...prev, [side]: sourceLabel }));
 
     const notes = [res.via === 'proxy' ? 'via proxy' : 'direct'];
     if (req.dropped.length) notes.push(`dropped ${req.dropped.join(', ')}`);
@@ -1417,6 +1521,42 @@ export default function JsonToolkit() {
     });
   };
 
+  const [importState, setImportState] = useState(null);
+
+  const exportSettings = () => {
+    const payload = buildSettingsExport({ bookmarks, theme, proxyUrl });
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `json-toolkit-settings-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImportFile = async (event) => {
+    const file = event.target.files && event.target.files[0];
+    event.target.value = ''; // let the same file be picked again after a cancel
+    if (!file) return;
+    try {
+      setImportState(parseSettingsImport(await file.text()));
+    } catch (err) {
+      setImportState({ error: `Could not read that file: ${err.message}` });
+    }
+  };
+
+  const confirmImport = () => {
+    if (!importState || importState.error) return;
+    if (importState.bookmarks) updateBookmarks(() => importState.bookmarks);
+    if (importState.theme) { setTheme(importState.theme); storeTheme(importState.theme); }
+    if (importState.proxyUrl !== null && importState.proxyUrl !== undefined) saveProxyUrl(importState.proxyUrl);
+    setImportState(null);
+    setPendingDelete(null);
+    setEditingBookmark(null);
+  };
+
   const toggleFolder = (id) =>
     setCollapsedFolders(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]));
 
@@ -1429,19 +1569,10 @@ export default function JsonToolkit() {
   const diffEntries = useMemo(() => (diffTree ? flattenDiffs(diffTree) : []), [diffTree]);
 
   // Name each side by where its data came from, falling back to the panel label
-  const sideLabel = useCallback((side) => {
-    const raw = side === 'left' ? leftRequest : rightRequest;
-    if (raw.trim()) {
-      const parsed = parseRequestInput(raw);
-      if (parsed.valid) {
-        try {
-          const u = new URL(parsed.url);
-          return `${u.hostname}${u.pathname.replace(/\/$/, '')}`;
-        } catch { /* fall through to the generic label */ }
-      }
-    }
-    return side === 'left' ? 'Left (Original)' : 'Right (Modified)';
-  }, [leftRequest, rightRequest]);
+  const sideLabel = useCallback(
+    (side) => sideSource[side] || (side === 'left' ? 'Left (Original)' : 'Right (Modified)'),
+    [sideSource]
+  );
 
   // Expand every ancestor so the target row exists, then scroll to it. The
   // scroll waits a frame because the rows only mount on the next render.
@@ -1637,6 +1768,16 @@ export default function JsonToolkit() {
           <div style={{ minWidth: 100, maxWidth: 180, paddingRight: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ fontFamily: 'monospace', fontSize: 12, color: node.status !== 'unchanged' ? t.text : t.textSecondary, fontWeight: node.status !== 'unchanged' ? 600 : 400 }}>{node.key}</span>
             {node.status !== 'unchanged' && <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 700, background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}` }}>{node.status === 'added' ? '+' : node.status === 'removed' ? '−' : node.status === 'modified' ? '~' : '⇄'}</span>}
+            {/* stopPropagation: the row itself toggles expand/collapse on click */}
+            {(isHovered || copied === node.path) && (
+              <button
+                onClick={e => { e.stopPropagation(); copyPath(node.path); }}
+                title={`Copy path: ${node.path}`}
+                style={{ padding: '1px 5px', background: 'transparent', border: `1px solid ${t.border}`, borderRadius: 4, color: copied === node.path ? t.success : t.textMuted, cursor: 'pointer', fontSize: 10, lineHeight: '15px' }}
+              >
+                {copied === node.path ? '✓' : '⧉'}
+              </button>
+            )}
           </div>
           {isLeaf && (
             <div style={{ display: 'flex', flex: 1, gap: 6, alignItems: 'center', paddingRight: 10 }}>
@@ -1928,7 +2069,20 @@ export default function JsonToolkit() {
   };
 
   // Input Panel
+  const toggleTheme = () => setTheme(prev => {
+    const next = prev === 'dark' ? 'light' : 'dark';
+    storeTheme(next);
+    return next;
+  });
+
   const panelActions = { format, minify, toJsonFmt, toYamlFmt, sortKeys, copy };
+
+  // Editing a diff panel by hand means it no longer holds the fetched response.
+  // Toolbar actions (format, sort, …) keep the source: they transform it.
+  const editPanel = (side) => (value) => {
+    (side === 'left' ? setLeftJson : setRightJson)(value);
+    setSideSource(prev => (prev[side] === null ? prev : { ...prev, [side]: null }));
+  };
 
   const Btn = ({ children, onClick, active, color }) => (
     <button onClick={onClick} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '12px 20px', background: active ? t.accentLight : 'transparent', border: active ? `2px solid ${t.accent}60` : '2px solid transparent', borderRadius: 10, color: active ? t.accent : color || t.textMuted, cursor: 'pointer', fontSize: 14, fontWeight: 600, transition: 'all 0.2s', minWidth: 90 }}>{children}</button>
@@ -1966,7 +2120,7 @@ export default function JsonToolkit() {
             <button onClick={loadSample} style={btnStyle}>📄 Sample</button>
             <button onClick={clear} style={btnStyle}>🗑️ Clear</button>
             {activeTab === 'diff' && <button onClick={swap} style={btnStyle}>⇄ Swap</button>}
-            <button onClick={() => setTheme(th => th === 'dark' ? 'light' : 'dark')} style={btnStyle}>{t.name === 'dark' ? '☀️ Light' : '🌙 Dark'}</button>
+            <button onClick={toggleTheme} style={btnStyle}>{t.name === 'dark' ? '☀️ Light' : '🌙 Dark'}</button>
           </div>
         </div>
       </header>
@@ -2028,6 +2182,11 @@ export default function JsonToolkit() {
                   onAskDelete={askDelete}
                   onConfirmDelete={confirmDelete}
                   onMoveItem={moveBookmark}
+                  onExport={exportSettings}
+                  onImportFile={handleImportFile}
+                  importState={importState}
+                  onConfirmImport={confirmImport}
+                  onCancelImport={() => setImportState(null)}
                 />
               )}
 
@@ -2048,8 +2207,8 @@ export default function JsonToolkit() {
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
-              <InputPanel t={t} actions={panelActions} copied={copied} side="left" label="Left (Original)" color={t.error} value={leftJson} setter={setLeftJson} parsed={leftParsed} />
-              <InputPanel t={t} actions={panelActions} copied={copied} side="right" label="Right (Modified)" color={t.success} value={rightJson} setter={setRightJson} parsed={rightParsed} />
+              <InputPanel t={t} actions={panelActions} copied={copied} side="left" label="Left (Original)" color={t.error} value={leftJson} setter={editPanel('left')} parsed={leftParsed} />
+              <InputPanel t={t} actions={panelActions} copied={copied} side="right" label="Right (Modified)" color={t.success} value={rightJson} setter={editPanel('right')} parsed={rightParsed} />
             </div>
 
             {diffTree && stats && (stats.added > 0 || stats.removed > 0 || stats.modified > 0) && (
@@ -2065,19 +2224,6 @@ export default function JsonToolkit() {
                   </div>
                 ))}
               </div>
-            )}
-
-            {diffEntries.length > 0 && (
-              <DiffSummary
-                t={t}
-                btnStyle={btnStyle}
-                entries={diffEntries}
-                leftLabel={sideLabel('left')}
-                rightLabel={sideLabel('right')}
-                onJump={jumpToPath}
-                onCopy={copyPath}
-                copiedPath={copied}
-              />
             )}
 
             {diffTree && (
@@ -2133,6 +2279,19 @@ export default function JsonToolkit() {
                 ) : diffTree ? <DiffNode node={diffTree} /> : null}
               </div>
             </div>
+
+            {diffEntries.length > 0 && (
+              <DiffSummary
+                t={t}
+                btnStyle={btnStyle}
+                entries={diffEntries}
+                leftLabel={sideLabel('left')}
+                rightLabel={sideLabel('right')}
+                onJump={jumpToPath}
+                onCopy={copyPath}
+                copiedPath={copied}
+              />
+            )}
           </>
         )}
 
