@@ -31,8 +31,14 @@ Below the tree, a plain-language account of what actually differs:
   scroll to it, or **⧉** to copy the path
 - Each row in the diff tree also carries a **⧉** on hover that copies that key's path
 - A subtree added or removed wholesale is reported at its root, not once per descendant
+- A **filter box** narrows the list by key path *or* by either side's value — searching
+  `price` finds the paths, searching `dark` finds the key holding it — with a "showing N of M"
+  count while the headline keeps the true total
 - Groups longer than 25 entries collapse behind **Show all N**, so a large API diff does not
   become its own wall of text
+
+The diff tree above has its own separate search, next to Expand All, which filters tree rows
+by key path.
 
 ### 🌐 Import from URL or curl
 - A **separate request field per side**, each with its own Fetch button, status line, and Clear

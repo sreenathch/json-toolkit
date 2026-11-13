@@ -782,14 +782,29 @@ const DiffSummary = ({ t, btnStyle, entries, leftLabel, rightLabel, onJump, onCo
   // Safe here: this component lives at module scope, so its identity is stable
   // across renders and the state is not reset on every keystroke elsewhere.
   const [shownInFull, setShownInFull] = useState([]);
+  const [filter, setFilter] = useState('');
+
+  // Match the key path and both rendered values, so "v2.1" or "price" both work
+  const query = filter.trim().toLowerCase();
+  const matches = (e) => !query
+    || e.path.toLowerCase().includes(query)
+    || summariseValue(e.lv, e.lt).toLowerCase().includes(query)
+    || summariseValue(e.rv, e.rt).toLowerCase().includes(query);
+
+  const visible = query ? entries.filter(matches) : entries;
+
   const groups = [
     { id: 'removed', title: `Only in ${leftLabel}`, hint: 'present on the left, missing on the right', color: t.error },
     { id: 'added', title: `Only in ${rightLabel}`, hint: 'present on the right, missing on the left', color: t.success },
     { id: 'modified', title: 'Different values', hint: 'same key on both sides, different value', color: t.warning },
     { id: 'type_changed', title: 'Different types', hint: 'same key, but the kind of value changed', color: t.accent },
+  ].map(g => ({ ...g, items: visible.filter(e => e.status === g.id) })).filter(g => g.items.length);
+
+  const allGroups = [
+    { id: 'removed' }, { id: 'added' }, { id: 'modified' }, { id: 'type_changed' },
   ].map(g => ({ ...g, items: entries.filter(e => e.status === g.id) })).filter(g => g.items.length);
 
-  const sentence = groups
+  const sentence = allGroups
     .map(g => `${g.items.length} ${g.id === 'removed' ? `only in ${leftLabel}`
       : g.id === 'added' ? `only in ${rightLabel}`
       : g.id === 'modified' ? 'with a different value' : 'with a different type'}`)
@@ -801,9 +816,30 @@ const DiffSummary = ({ t, btnStyle, entries, leftLabel, rightLabel, onJump, onCo
         <strong style={{ color: t.error }}>{leftLabel}</strong> and <strong style={{ color: t.success }}>{rightLabel}</strong>{' '}
         differ at <strong style={{ color: t.accent }}>{entries.length}</strong> path{entries.length === 1 ? '' : 's'}: {sentence}.
       </p>
-      <p style={{ margin: '0 0 12px', fontSize: 11, color: t.textDim }}>
-        Click a path to jump to it in the tree below, or use ⧉ to copy it.
-      </p>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, margin: '0 0 12px', flexWrap: 'wrap' }}>
+        <p style={{ margin: 0, fontSize: 11, color: t.textDim }}>
+          Click a path to jump to it in the tree above, or use ⧉ to copy it.
+          {query && ` Showing ${visible.length} of ${entries.length}.`}
+        </p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <input
+            type="text"
+            value={filter}
+            onChange={e => setFilter(e.target.value)}
+            placeholder="🔍 Filter paths or values…"
+            style={{ padding: '6px 12px', background: t.bgTertiary, border: `1px solid ${t.border}`, borderRadius: 6, color: t.text, fontSize: 12, width: 210, outline: 'none' }}
+          />
+          {filter && (
+            <button onClick={() => setFilter('')} style={{ ...btnStyle, height: 26, fontSize: 11 }}>Clear</button>
+          )}
+        </div>
+      </div>
+
+      {query && groups.length === 0 && (
+        <p style={{ margin: '12px 0 0', fontSize: 12, color: t.textMuted }}>
+          No differing path or value matches “{filter.trim()}”.
+        </p>
+      )}
 
       {groups.map(group => (
         <div key={group.id} style={{ marginTop: 12 }}>
