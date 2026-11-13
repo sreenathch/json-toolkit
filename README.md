@@ -10,6 +10,12 @@ A free, open-source JSON diff checker, validator, and formatter built for develo
 ## ✨ Features
 
 ### 🌳 Tree Diff View
+- **Character-level diff for strings**, in the spirit of `git diff --word-diff`: only the
+  characters that actually changed are highlighted — `Item `**`B`** → `Item `**`C`**, not two
+  opaque blobs
+- Values render **in full**, wrapped rather than ellipsed; anything over 400 characters
+  collapses behind a **Show all N** toggle instead of being silently cut
+- **⧉ copy buttons on hover** for the key path and for each side's value independently
 - Visual hierarchy with expandable/collapsible nodes
 - Side-by-side value comparison with arrows
 - Color-coded changes (added, removed, modified, type changed)

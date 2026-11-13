@@ -867,9 +867,9 @@ const DiffSummary = ({ t, btnStyle, entries, leftLabel, rightLabel, onJump, onCo
               </button>
               {entry.status === 'modified' && (
                 <span style={{ fontSize: 11, fontFamily: 'monospace', color: t.textMuted }}>
-                  <span style={{ color: t.error }}>{summariseValue(entry.lv, entry.lt)}</span>
+                  <span title={String(entry.lv)} style={{ color: t.error }}>{summariseValue(entry.lv, entry.lt)}</span>
                   {' → '}
-                  <span style={{ color: t.success }}>{summariseValue(entry.rv, entry.rt)}</span>
+                  <span title={String(entry.rv)} style={{ color: t.success }}>{summariseValue(entry.rv, entry.rt)}</span>
                 </span>
               )}
               {entry.status === 'type_changed' && (
@@ -896,6 +896,135 @@ const DiffSummary = ({ t, btnStyle, entries, leftLabel, rightLabel, onJump, onCo
         </div>
       ))}
     </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Character-level string diff, in the spirit of `git diff --word-diff`.
+// ---------------------------------------------------------------------------
+
+// Backtracked LCS. Quadratic in time and memory, so callers must bound the
+// input — diffChars trims the common prefix/suffix first and falls back to a
+// whole-string replace when what remains is still too large.
+const lcsDiff = (a, b) => {
+  const n = a.length;
+  const m = b.length;
+  const dp = Array.from({ length: n + 1 }, () => new Uint32Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+
+  const out = [];
+  const push = (type, ch) => {
+    const last = out[out.length - 1];
+    if (last && last.type === type) last.text += ch;
+    else out.push({ type, text: ch });
+  };
+
+  let i = 0;
+  let j = 0;
+  while (i < n && j < m) {
+    if (a[i] === b[j]) { push('same', a[i]); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { push('del', a[i]); i++; }
+    else { push('ins', b[j]); j++; }
+  }
+  while (i < n) { push('del', a[i]); i++; }
+  while (j < m) { push('ins', b[j]); j++; }
+  return out;
+};
+
+const CHAR_DIFF_LIMIT = 900; // ~810k DP cells worst case
+
+const diffChars = (a, b) => {
+  if (a === b) return [{ type: 'same', text: a }];
+
+  let head = 0;
+  while (head < a.length && head < b.length && a[head] === b[head]) head++;
+
+  let tail = 0;
+  while (
+    tail < a.length - head &&
+    tail < b.length - head &&
+    a[a.length - 1 - tail] === b[b.length - 1 - tail]
+  ) tail++;
+
+  const midA = a.slice(head, a.length - tail);
+  const midB = b.slice(head, b.length - tail);
+
+  let middle;
+  if (!midA) middle = midB ? [{ type: 'ins', text: midB }] : [];
+  else if (!midB) middle = [{ type: 'del', text: midA }];
+  else if (midA.length > CHAR_DIFF_LIMIT || midB.length > CHAR_DIFF_LIMIT) {
+    middle = [{ type: 'del', text: midA }, { type: 'ins', text: midB }];
+  } else {
+    middle = lcsDiff(midA, midB);
+  }
+
+  const segments = [];
+  if (head) segments.push({ type: 'same', text: a.slice(0, head) });
+  segments.push(...middle);
+  if (tail) segments.push({ type: 'same', text: a.slice(a.length - tail) });
+  return segments;
+};
+
+const VALUE_PREVIEW_CHARS = 400;
+
+// One side of a leaf comparison. Strings render in full (wrapped, never
+// ellipsed) with the differing characters highlighted; very long ones collapse
+// behind a toggle so a single description cannot push the tree off-screen.
+const DiffValue = ({ t, value, type, segments, side, expanded, onToggleExpand }) => {
+  if (value === undefined) return <span style={{ color: t.textDim }}>—</span>;
+  if (value === null) return <span style={{ color: t.null, fontStyle: 'italic' }}>null</span>;
+  if (type === 'number') return <span style={{ color: t.number }}>{String(value)}</span>;
+  if (type === 'boolean') return <span style={{ color: t.boolean }}>{String(value)}</span>;
+  if (type === 'array') return <span style={{ color: t.bracket }}>[{value.length}]</span>;
+  if (type === 'object') return <span style={{ color: t.bracket }}>{`{${Object.keys(value).length}}`}</span>;
+  if (type !== 'string') return <span>{String(value)}</span>;
+
+  const long = value.length > VALUE_PREVIEW_CHARS;
+  const mark = side === 'left' ? 'del' : 'ins';
+  const markStyle = {
+    background: side === 'left' ? `${t.error}38` : `${t.success}38`,
+    color: side === 'left' ? t.error : t.success,
+    borderRadius: 2,
+    padding: '0 1px',
+    fontWeight: 600,
+  };
+
+  // Only this side's own changes are highlighted: the left cell shows what was
+  // removed, the right cell what was added.
+  const shown = segments
+    ? segments.filter(seg => seg.type === 'same' || seg.type === mark)
+    : [{ type: 'same', text: value }];
+
+  let budget = long && !expanded ? VALUE_PREVIEW_CHARS : Infinity;
+  const parts = [];
+  for (let i = 0; i < shown.length && budget > 0; i++) {
+    const seg = shown[i];
+    const text = seg.text.length > budget ? seg.text.slice(0, budget) : seg.text;
+    budget -= text.length;
+    parts.push(
+      seg.type === 'same'
+        ? <span key={i}>{text}</span>
+        : <span key={i} style={markStyle}>{text}</span>
+    );
+  }
+
+  return (
+    <span style={{ color: t.string, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+      "{parts}
+      {long && !expanded && <span style={{ color: t.textDim }}>…</span>}"
+      {long && (
+        <button
+          onClick={e => { e.stopPropagation(); onToggleExpand(); }}
+          style={{ marginLeft: 6, padding: '0 5px', background: 'transparent', border: `1px solid ${t.border}`, borderRadius: 3, color: t.textMuted, cursor: 'pointer', fontSize: 10 }}
+        >
+          {expanded ? 'Show less' : `Show all ${value.length}`}
+        </button>
+      )}
+    </span>
   );
 };
 
@@ -1646,9 +1775,11 @@ export default function JsonToolkit() {
     });
   };
 
-  const copyPath = (path) => {
-    navigator.clipboard.writeText(path);
-    setCopied(path);
+  // `id` separates the "just copied" marker from the text itself, so copying a
+  // value does not light up a path that happens to be identical.
+  const copyText = (text, id = text) => {
+    navigator.clipboard.writeText(text);
+    setCopied(id);
     setTimeout(() => setCopied(null), 1500);
   };
 
@@ -1779,20 +1910,10 @@ export default function JsonToolkit() {
     unchanged: { bg: 'transparent', border: 'transparent', color: t.textMuted }
   };
 
-  const fmtVal = (v, type) => {
-    if (v === undefined) return <span style={{ color: t.textDim }}>—</span>;
-    if (v === null) return <span style={{ color: t.null, fontStyle: 'italic' }}>null</span>;
-    if (type === 'string') return <span style={{ color: t.string }}>"{v.length > 30 ? v.slice(0, 30) + '...' : v}"</span>;
-    if (type === 'number') return <span style={{ color: t.number }}>{v}</span>;
-    if (type === 'boolean') return <span style={{ color: t.boolean }}>{String(v)}</span>;
-    if (type === 'array') return <span style={{ color: t.bracket }}>[{v.length}]</span>;
-    if (type === 'object') return <span style={{ color: t.bracket }}>{`{${Object.keys(v).length}}`}</span>;
-    return String(v);
-  };
-
   // Tree Node for Diff
   const DiffNode = ({ node, depth = 0 }) => {
     const [isHovered, setIsHovered] = useState(false);
+    const [valueExpanded, setValueExpanded] = useState(false);
     
     if (!node) return null;
     const exp = expandedNodes.has(node.path) || (searchMatches !== null && searchMatches.has(node.path));
@@ -1802,6 +1923,27 @@ export default function JsonToolkit() {
 
     if (searchMatches && !searchMatches.has(node.path)) return null;
     if (showOnlyDiffs && node.status === 'unchanged' && !node.children.some(c => c.status !== 'unchanged')) return null;
+
+    // Character-level diff, only where it means something: two strings that
+    // actually differ. Everything else renders plainly.
+    const charSegments = (node.status === 'modified' && node.lt === 'string' && node.rt === 'string')
+      ? diffChars(node.lv, node.rv)
+      : null;
+
+    const valueCopyBtn = (value, type, which) => {
+      if (value === undefined || value === null || !isHovered) return null;
+      const text = type === 'object' || type === 'array' ? toJson(value) : String(value);
+      const id = `${node.path}::${which}`;
+      return (
+        <button
+          onClick={e => { e.stopPropagation(); copyText(text, id); }}
+          title="Copy this value"
+          style={{ padding: '1px 5px', background: 'transparent', border: `1px solid ${t.border}`, borderRadius: 4, color: copied === id ? t.success : t.textMuted, cursor: 'pointer', fontSize: 10, lineHeight: '15px', flexShrink: 0, alignSelf: 'flex-start', marginTop: 3 }}
+        >
+          {copied === id ? '✓' : '⧉'}
+        </button>
+      );
+    };
 
     // Revert button style - consistent with other buttons
     const revertBtnStyle = { padding: '4px 8px', background: t.bgTertiary, border: `1px solid ${t.border}`, borderRadius: 4, color: t.textSecondary, cursor: 'pointer', fontSize: 11, fontWeight: 500, whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', justifyContent: 'center', height: 24 };
@@ -1824,7 +1966,7 @@ export default function JsonToolkit() {
             {/* stopPropagation: the row itself toggles expand/collapse on click */}
             {(isHovered || copied === node.path) && (
               <button
-                onClick={e => { e.stopPropagation(); copyPath(node.path); }}
+                onClick={e => { e.stopPropagation(); copyText(node.path); }}
                 title={`Copy path: ${node.path}`}
                 style={{ padding: '1px 5px', background: 'transparent', border: `1px solid ${t.border}`, borderRadius: 4, color: copied === node.path ? t.success : t.textMuted, cursor: 'pointer', fontSize: 10, lineHeight: '15px' }}
               >
@@ -1833,10 +1975,13 @@ export default function JsonToolkit() {
             )}
           </div>
           {isLeaf && (
-            <div style={{ display: 'flex', flex: 1, gap: 6, alignItems: 'center', paddingRight: 10 }}>
+            <div style={{ display: 'flex', flex: 1, gap: 6, alignItems: 'flex-start', paddingRight: 10 }}>
               {/* Left value with revert button */}
-              <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6 }}>
-                <div style={{ flex: 1, padding: '4px 8px', borderRadius: 5, fontFamily: 'monospace', fontSize: 11, background: ['removed', 'modified', 'type_changed'].includes(node.status) ? t.errorLight : t.bgTertiary }}>{fmtVal(node.lv, node.lt)}</div>
+              <div style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, minWidth: 0 }}>
+                <div style={{ flex: 1, padding: '4px 8px', borderRadius: 5, fontFamily: 'monospace', fontSize: 11, lineHeight: 1.5, minWidth: 0, background: ['removed', 'modified', 'type_changed'].includes(node.status) ? t.errorLight : t.bgTertiary }}>
+                  <DiffValue t={t} value={node.lv} type={node.lt} segments={charSegments} side="left" expanded={valueExpanded} onToggleExpand={() => setValueExpanded(v => !v)} />
+                </div>
+                {valueCopyBtn(node.lv, node.lt, 'left')}
                 {isHovered && node.status !== 'unchanged' && (
                   <button 
                     onClick={e => { e.stopPropagation(); revertToLeft(node); }} 
@@ -1859,7 +2004,10 @@ export default function JsonToolkit() {
                     ←
                   </button>
                 )}
-                <div style={{ flex: 1, padding: '4px 8px', borderRadius: 5, fontFamily: 'monospace', fontSize: 11, background: ['added', 'modified', 'type_changed'].includes(node.status) ? t.successLight : t.bgTertiary }}>{fmtVal(node.rv, node.rt)}</div>
+                {valueCopyBtn(node.rv, node.rt, 'right')}
+                <div style={{ flex: 1, padding: '4px 8px', borderRadius: 5, fontFamily: 'monospace', fontSize: 11, lineHeight: 1.5, minWidth: 0, background: ['added', 'modified', 'type_changed'].includes(node.status) ? t.successLight : t.bgTertiary }}>
+                  <DiffValue t={t} value={node.rv} type={node.rt} segments={charSegments} side="right" expanded={valueExpanded} onToggleExpand={() => setValueExpanded(v => !v)} />
+                </div>
               </div>
             </div>
           )}
@@ -2341,7 +2489,7 @@ export default function JsonToolkit() {
                 leftLabel={sideLabel('left')}
                 rightLabel={sideLabel('right')}
                 onJump={jumpToPath}
-                onCopy={copyPath}
+                onCopy={copyText}
                 copiedPath={copied}
               />
             )}
