@@ -1958,8 +1958,12 @@ export default function JsonToolkit() {
       : null;
 
     const valueCopyBtn = (value, type, which) => {
-      if (value === undefined || value === null || !isHovered) return null;
-      const text = type === 'object' || type === 'array' ? toJson(value) : String(value);
+      // `undefined` means the key is absent on that side — nothing to copy.
+      // `null` is a real JSON value, so it gets a button like any other.
+      if (value === undefined || !isHovered) return null;
+      const text = value === null ? 'null'
+        : (type === 'object' || type === 'array') ? toJson(value)
+        : String(value);
       const id = `${node.path}::${which}`;
       return (
         <button
@@ -2041,6 +2045,9 @@ export default function JsonToolkit() {
           {!isLeaf && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ color: t.textMuted, fontSize: 11, fontFamily: 'monospace' }}>{node.lt === 'array' ? `[${node.lv?.length || 0}]` : `{${Object.keys(node.lv || {}).length}}`}{node.status === 'modified' && <span style={{ color: t.warning, marginLeft: 4 }}>•</span>}</span>
+              {/* Copying a whole changed object or array is often the point */}
+              {valueCopyBtn(node.lv, node.lt, 'left')}
+              {valueCopyBtn(node.rv, node.rt, 'right')}
               {isHovered && node.status !== 'unchanged' && (
                 <div style={{ display: 'flex', gap: 4 }}>
                   <button 
