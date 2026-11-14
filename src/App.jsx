@@ -1203,6 +1203,37 @@ export default function JsonToolkit() {
   const vizParsed = useMemo(() => smartParse(visualizerJson), [visualizerJson]);
   const convParsed = useMemo(() => smartParse(converterInput), [converterInput]);
   const vizStats = useMemo(() => vizParsed.valid && vizParsed.data ? countStats(vizParsed.data) : null, [vizParsed]);
+
+  // Open just enough of the tree to reveal search hits, once per query.
+  // Done by writing to the expansion state rather than overriding it at render
+  // time, so collapsing and expanding still work while a filter is active.
+  useEffect(() => {
+    const q = vizSearch.trim().toLowerCase();
+    if (!q || !vizParsed.valid || !vizParsed.data) return;
+
+    const reveal = new Set();
+    const walk = (node, path, keyName, ancestors) => {
+      const type = getType(node);
+      const isContainer = type === 'object' || type === 'array';
+      const selfMatch = String(keyName).toLowerCase().includes(q)
+        || (!isContainer && String(node).toLowerCase().includes(q));
+
+      if (selfMatch) {
+        ancestors.forEach(a => reveal.add(a));
+        if (isContainer) reveal.add(path); // show the matched key's own value
+      }
+      if (isContainer) {
+        const entries = type === 'array'
+          ? node.map((v, i) => [`[${i}]`, v])
+          : Object.entries(node).map(([k, v]) => [`.${k}`, v]);
+        entries.forEach(([suffix, v]) =>
+          walk(v, `${path}${suffix}`, suffix.replace(/^[.[]|]$/g, ''), [...ancestors, path]));
+      }
+    };
+    walk(vizParsed.data, '$', 'root', []);
+
+    if (reveal.size) setVizExpanded(prev => new Set([...prev, ...reveal]));
+  }, [vizSearch, vizParsed]);
   
   // JWT parsing
   const jwtDecoded = useMemo(() => jwtInput.trim() ? decodeJWT(jwtInput) : null, [jwtInput]);
@@ -2077,9 +2108,7 @@ export default function JsonToolkit() {
   // Tree Node for Visualizer (Interactive)
   const VizNode = ({ data, path = '$', keyName = 'root', depth = 0, parentIsArray = false, ancestorMatched = false }) => {
     const type = getType(data);
-    // While searching, anything still rendered is on a matching path, so open
-    // it rather than make the user expand to find the hit.
-    const exp = vizExpanded.has(path) || !!vizSearch;
+    const exp = vizExpanded.has(path);
     const hover = vizHover === path;
     const hasKids = (type === 'object' && data && Object.keys(data).length > 0) || (type === 'array' && data.length > 0);
     const isEditingValue = editingPath === path;
