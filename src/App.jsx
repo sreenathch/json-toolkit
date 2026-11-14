@@ -2075,23 +2075,32 @@ export default function JsonToolkit() {
   };
 
   // Tree Node for Visualizer (Interactive)
-  const VizNode = ({ data, path = '$', keyName = 'root', depth = 0, parentIsArray = false }) => {
+  const VizNode = ({ data, path = '$', keyName = 'root', depth = 0, parentIsArray = false, ancestorMatched = false }) => {
     const type = getType(data);
-    const exp = vizExpanded.has(path);
+    // While searching, anything still rendered is on a matching path, so open
+    // it rather than make the user expand to find the hit.
+    const exp = vizExpanded.has(path) || !!vizSearch;
     const hover = vizHover === path;
     const hasKids = (type === 'object' && data && Object.keys(data).length > 0) || (type === 'array' && data.length > 0);
     const isEditingValue = editingPath === path;
     const isEditingKey = editingKeyPath === path;
 
-    if (vizSearch) {
+    // Once a node matches, its whole subtree is shown. The filter used to run
+    // on every node independently, so searching for an object's key kept that
+    // row but dropped all of its children — the value looked empty.
+    let subtreeShown = ancestorMatched;
+    if (vizSearch && !ancestorMatched) {
       const s = vizSearch.toLowerCase();
-      const match = String(keyName).toLowerCase().includes(s) || (type !== 'object' && type !== 'array' && String(data).toLowerCase().includes(s));
-      if (!match && hasKids) {
-        let childMatch = false;
-        if (type === 'array') childMatch = data.some((x, i) => JSON.stringify(x).toLowerCase().includes(s));
-        else if (type === 'object') childMatch = Object.entries(data).some(([k, v]) => k.toLowerCase().includes(s) || JSON.stringify(v).toLowerCase().includes(s));
-        if (!childMatch) return null;
-      } else if (!match) return null;
+      const selfMatch = String(keyName).toLowerCase().includes(s)
+        || (type !== 'object' && type !== 'array' && String(data).toLowerCase().includes(s));
+      if (selfMatch) {
+        subtreeShown = true;
+      } else {
+        // Stringifying covers keys and values at any depth below here, not
+        // just the immediate children the old check looked at.
+        const deepMatch = hasKids && JSON.stringify(data).toLowerCase().includes(s);
+        if (!deepMatch) return null;
+      }
     }
 
     const startEditValue = (e) => {
@@ -2295,7 +2304,7 @@ export default function JsonToolkit() {
         </div>
         {hasKids && exp && (
           <div style={{ borderLeft: `1px dashed ${t.border}`, marginLeft: 7, paddingLeft: 2 }}>
-            {type === 'array' ? data.map((x, i) => <VizNode key={`${path}[${i}]`} data={x} path={`${path}[${i}]`} keyName={i} depth={depth + 1} parentIsArray={true} />) : Object.entries(data).map(([k, v]) => <VizNode key={`${path}.${k}`} data={v} path={`${path}.${k}`} keyName={k} depth={depth + 1} parentIsArray={false} />)}
+            {type === 'array' ? data.map((x, i) => <VizNode key={`${path}[${i}]`} data={x} path={`${path}[${i}]`} keyName={i} depth={depth + 1} parentIsArray={true} ancestorMatched={subtreeShown} />) : Object.entries(data).map(([k, v]) => <VizNode key={`${path}.${k}`} data={v} path={`${path}.${k}`} keyName={k} depth={depth + 1} parentIsArray={false} ancestorMatched={subtreeShown} />)}
             <div style={{ padding: '2px 6px', marginLeft: 16, fontFamily: 'monospace', fontSize: 11, color: t.bracket }}>{type === 'array' ? ']' : '}'}</div>
           </div>
         )}
